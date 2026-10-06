@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "Check In",
+    "slug": "checkin-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.horaires.checkin"
+    },
+    "android": {
+      "package": "com.horaires.checkin"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "@react-native-community/datetimepicker",
+      "expo-font"
+    ]
+  }
+}

@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- ENUMS ----------
+
+enum UserRole {
+  admin
+  manager
+  employee
+}
+
+enum UserStatus {
+  active
+  invited
+  disabled
+}
+
+enum ShiftStatus {
+  draft
+  published
+  cancelled
+}
+
+enum AssignmentStatus {
+  assigned
+  offered
+  swap_pending
+  confirmed
+  cancelled
+}
+
+enum OfferStatus {
+  open
+  accepted
+  approved
+  rejected
+  expired
+}
+
+enum TimeEntryType {
+  clock_in
+  clock_out
+  break_start
+  break_end
+}
+
+enum TimeEntrySource {
+  qr_scan_own_phone
+  badge_scan
+  pin_code
+  gps
+  manual_by_manager
+}
+
+// ---------- MODELS ----------
+
+model Company {
+  id        String   @id @default(uuid())
+  name      String
+  plan      String   @default("free")
+  // Réglage par défaut pour toute l'entreprise — surchargeable par employé
+  // via User.gpsClockInEnabled (voir TimeEntriesService).
+  gpsClockInEnabled Boolean @default(true) @map("gps_clock_in_enabled")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  sites     Site[]
+  users     User[]
+  auditLogs AuditLog[]
+
+  @@map("companies")
+}
+
+model Site {
+  id        String   @id @default(uuid())
+  companyId String   @map("company_id")
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  address   String?
+  geoLat    Decimal? @map("geo_lat")
+  geoLng    Decimal? @map("geo_lng")
+  timezone  String   @default("Europe/Brussels")
+
+  devices     SiteDevice[]
+  shifts      Shift[]
+  timeEntries TimeEntry[]
+  employees   User[]
+
+  @@map("sites")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  companyId    String     @map("company_id")
+  company      Company    @relation(fields: [companyId], references: [id])
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  firstName    String     @map("first_name")
+  lastName     String     @map("last_name")
+  role         UserRole   @default(employee)
+  status       UserStatus @default(invited)
+  pinCodeHash  String?    @map("pin_code_hash")
+  badgeCode    String?    @unique @map("badge_code")
+  // Site "de rattachement" de l'employé — optionnel : null = pas encore
+  // assigné, reste visible sur TOUS les sites du planning (voir
+  // UsersService.findAll) plutôt que de disparaître partout. onDelete:
+  // SetNull pour que supprimer un site libère ses employés au lieu de
+  // bloquer la suppression (contrairement à Shift/TimeEntry/SiteDevice, qui
+  // sont les vraies données opérationnelles du site).
+  siteId       String?    @map("site_id")
+  site         Site?      @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  // Secret TOTP (RFC 6238) propre à cet utilisateur — sert à générer le QR
+  // rotatif affiché sur son téléphone. Généré une seule fois, à la première
+  // activation du pointage QR (voir RotatingQrService.generateCode). Jamais
+  // exposé au client : seul le code à 6 chiffres dérivé l'est.
+  qrSecret     String?    @map("qr_secret")
+  // Surcharge individuelle du réglage entreprise (Company.gpsClockInEnabled) —
+  // null = hérite du réglage entreprise, true/false = override explicite.
+  gpsClockInEnabled Boolean? @map("gps_clock_in_enabled")
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  timeEntries         TimeEntry[]       @relation("UserTimeEntries")
+  editedTimeEntries   TimeEntry[]       @relation("EditedByManager")
+  createdTimeEntries  TimeEntry[]       @relation("CreatedByManager")
+  shiftAssignments    ShiftAssignment[]
+  shiftOfferCandidacies ShiftOfferCandidate[]
+  availabilities      Availability[]
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+model SiteDevice {
+  id          String   @id @default(uuid())
+  siteId      String   @map("site_id")
+  site        Site     @relation(fields: [siteId], references: [id])
+  deviceLabel String   @map("device_label")
+  qrSecret    String   @map("qr_secret")
+  qrRotatedAt DateTime @default(now()) @map("qr_rotated_at")
+
+  timeEntries TimeEntry[]
+
+  @@map("site_devices")
+}
+
+model TimeEntry {
+  id             String           @id @default(uuid())
+  userId         String           @map("user_id")
+  user           User             @relation("UserTimeEntries", fields: [userId], references: [id])
+  siteId         String           @map("site_id")
+  site           Site             @relation(fields: [siteId], references: [id])
+  deviceId       String?          @map("device_id")
+  device         SiteDevice?      @relation(fields: [deviceId], references: [id])
+  type           TimeEntryType
+  timestamp      DateTime
+  geoLat         Decimal?         @map("geo_lat")
+  geoLng         Decimal?         @map("geo_lng")
+  source         TimeEntrySource
+  createdBy      String?          @map("created_by")
+  createdByUser  User?            @relation("CreatedByManager", fields: [createdBy], references: [id])
+  creationReason String?          @map("creation_reason")
+  isEdited       Boolean          @default(false) @map("is_edited")
+  editedBy       String?          @map("edited_by")
+  editedByUser   User?            @relation("EditedByManager", fields: [editedBy], references: [id])
+  editReason     String?          @map("edit_reason")
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  @@map("time_entries")
+}
+
+model Shift {
+  id         String      @id @default(uuid())
+  siteId     String      @map("site_id")
+  site       Site        @relation(fields: [siteId], references: [id])
+  startsAt   DateTime    @map("starts_at")
+  endsAt     DateTime    @map("ends_at")
+  roleNeeded String?     @map("role_needed")
+  status     ShiftStatus @default(draft)
+  createdBy  String      @map("created_by")
+
+  assignments ShiftAssignment[]
+
+  @@map("shifts")
+}
+
+model ShiftAssignment {
+  id      String           @id @default(uuid())
+  shiftId String           @map("shift_id")
+  shift   Shift            @relation(fields: [shiftId], references: [id])
+  userId  String           @map("user_id")
+  user    User             @relation(fields: [userId], references: [id])
+  status  AssignmentStatus @default(assigned)
+
+  offers ShiftOffer[]
+
+  @@map("shift_assignments")
+}
+
+model ShiftOffer {
+  id                      String          @id @default(uuid())
+  shiftAssignmentId       String          @map("shift_assignment_id")
+  shiftAssignment         ShiftAssignment @relation(fields: [shiftAssignmentId], references: [id])
+  offeredBy               String          @map("offered_by")
+  // Renseigné seulement une fois l'offre résolue (status: approved) — le
+  // candidat que le manager a choisi. Tant que l'offre est "open", les
+  // candidatures se trouvent dans `candidates`, pas ici : plusieurs
+  // collègues peuvent candidater avant que le manager n'en choisisse un.
+  acceptedBy              String?         @map("accepted_by")
+  status                  OfferStatus     @default(open)
+  requiresManagerApproval Boolean         @default(true) @map("requires_manager_approval")
+  createdAt               DateTime        @default(now()) @map("created_at")
+  resolvedAt              DateTime?       @map("resolved_at")
+
+  candidates ShiftOfferCandidate[]
+
+  @@map("shift_offers")
+}
+
+// Un collègue candidat sur une offre encore ouverte — plusieurs candidatures
+// possibles par offre, le manager choisit laquelle approuver (voir
+// ShiftsService.approveOffer). Distinct de ShiftOffer.acceptedBy, qui ne
+// représente que le choix final une fois l'offre résolue.
+model ShiftOfferCandidate {
+  id        String     @id @default(uuid())
+  offerId   String     @map("offer_id")
+  offer     ShiftOffer @relation(fields: [offerId], references: [id])
+  userId    String     @map("user_id")
+  user      User       @relation(fields: [userId], references: [id])
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  // Un même employé ne candidate qu'une fois par offre.
+  @@unique([offerId, userId])
+  @@map("shift_offer_candidates")
+}
+
+model Availability {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  user         User      @relation(fields: [userId], references: [id])
+  dayOfWeek    Int?      @map("day_of_week")
+  specificDate DateTime? @map("specific_date")
+  startTime    String    @map("start_time")
+  endTime      String    @map("end_time")
+  isAvailable  Boolean   @default(true) @map("is_available")
+
+  @@map("availabilities")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  companyId   String   @map("company_id")
+  company     Company  @relation(fields: [companyId], references: [id])
+  actorId     String   @map("actor_id")
+  actor       User     @relation(fields: [actorId], references: [id])
+  action      String
+  targetTable String?  @map("target_table")
+  targetId    String?  @map("target_id")
+  payload     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}

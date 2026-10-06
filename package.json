@@ -1,0 +1,22 @@
+{
+  "name": "horaires-app",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "turbo": "^2.1.0",
+    "typescript": "^5.4.0"
+  },
+  "packageManager": "pnpm@9.9.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "expo": "^54.0.0",
+    "expo-secure-store": "~15.0.8"
+  }
+}

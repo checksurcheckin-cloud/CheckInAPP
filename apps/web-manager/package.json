@@ -1,0 +1,30 @@
+{
+  "name": "@horaires/web-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "eslint src --ext ts,tsx",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@horaires/api-client": "workspace:*",
+    "@horaires/shared-types": "workspace:*",
+    "@horaires/ui-tokens": "workspace:*",
+    "@dnd-kit/core": "^6.1.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "lucide-react": "^0.469.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-router-dom": "^6.28.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.17",
+    "@types/react-dom": "~19.1.9",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.4.0"
+  }
+}

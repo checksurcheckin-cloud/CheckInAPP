@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "Check In POS",
+    "slug": "checkin-pos",
+    "version": "0.1.0",
+    "orientation": "landscape",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.horaires.checkinpos",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Scanner le QR de pointage des employés et le QR d'appairage du terminal."
+      }
+    },
+    "android": {
+      "package": "com.horaires.checkinpos",
+      "permissions": ["CAMERA"]
+    },
+    "plugins": ["expo-secure-store"]
+  }
+}

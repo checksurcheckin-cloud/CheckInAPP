@@ -640,7 +640,12 @@ Cible : PME de 20-100 employés par site.
       couleurs) et défile horizontalement au lieu de s'empiler sur
       plusieurs lignes passé un certain nombre de modèles
       (`templateRow` : `flexWrap: 'nowrap'`, `overflowX: 'auto'`,
-      `ShiftTemplateCard` en `flexShrink: 0`).
+      `ShiftTemplateCard` en `flexShrink: 0`). Elle vit dans sa propre barre
+      (`templateTray`, hors de la carte du formulaire) en `position: sticky;
+      top: 0` dans `main` : elle reste collée en haut pendant le défilement
+      de la grille pour pouvoir glisser un modèle sur n'importe quelle ligne
+      sans remonter. Une sentinelle + `IntersectionObserver` (root = `main`)
+      ajoute l'ombre et aplatit les coins du haut seulement une fois collée.
 
 27. **Sidebar (`AppShell`, web-manager) repliable en icônes seules, et fixe
     à l'écran — jamais emportée par le scroll d'une page.** Repliable :

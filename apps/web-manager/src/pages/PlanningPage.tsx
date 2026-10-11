@@ -90,6 +90,25 @@ export function PlanningPage() {
     apiClient.getAvailabilities().then(setAvailabilities);
   }, []);
 
+  const templateSentinelRef = useRef<HTMLDivElement>(null);
+  const [isTemplateTrayStuck, setIsTemplateTrayStuck] = useState(false);
+  const hasTemplates = templates.length > 0;
+
+  useEffect(() => {
+    const sentinel = templateSentinelRef.current;
+    if (!sentinel) {
+      setIsTemplateTrayStuck(false);
+      return;
+    }
+    // `main` (AppShell) est le conteneur qui défile, pas la fenêtre.
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsTemplateTrayStuck(!entry.isIntersecting),
+      { root: sentinel.closest('main') },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasTemplates]);
+
   useEffect(() => {
     apiClient.getSites().then((list) => {
       setSites(list);
@@ -536,16 +555,27 @@ export function PlanningPage() {
         </form>
         {error ? <p style={styles.error}>{error}</p> : null}
 
-        {templates.length > 0 ? (
-          <div style={styles.templateRow}>
-            {sortedTemplates.map((template) => (
-              <ShiftTemplateCard key={template.id} template={template} onDelete={deleteTemplate} />
-            ))}
-          </div>
-        ) : (
+        {templates.length === 0 ? (
           <p style={styles.emptyTemplates}>Aucun modèle pour l'instant — créez-en un ci-dessus.</p>
-        )}
+        ) : null}
       </div>
+
+      {/* Bibliothèque de modèles collée en haut de `main` pendant le défilement,
+          pour pouvoir glisser une carte sur n'importe quelle ligne de la grille
+          sans remonter. La sentinelle (hauteur 0) sort de l'écran au moment
+          où la barre se colle, ce qui active l'ombre. */}
+      {templates.length > 0 ? (
+        <>
+          <div ref={templateSentinelRef} aria-hidden style={styles.templateSentinel} />
+          <div style={{ ...styles.templateTray, ...(isTemplateTrayStuck ? styles.templateTrayStuck : {}) }}>
+            <div style={styles.templateRow}>
+              {sortedTemplates.map((template) => (
+                <ShiftTemplateCard key={template.id} template={template} onDelete={deleteTemplate} />
+              ))}
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {viewMode === 'week' ? (
         isLoading ? (
@@ -812,8 +842,26 @@ const styles: Record<string, React.CSSProperties> = {
     gap: spacing.sm,
     flexWrap: 'nowrap',
     overflowX: 'auto',
-    marginTop: spacing.md,
     paddingBottom: spacing.xs,
+  },
+  templateSentinel: { height: 0 },
+  // zIndex au-dessus des cellules sticky de la grille (zIndex 2).
+  templateTray: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 5,
+    backgroundColor: colors.surface,
+    border: `1px solid ${colors.border}`,
+    borderRadius: radius.md,
+    padding: `${spacing.sm}px ${spacing.md}px`,
+    marginBottom: spacing.xl,
+    transition: 'box-shadow 150ms ease, border-radius 150ms ease',
+  },
+  templateTrayStuck: {
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    borderTopColor: 'transparent',
+    boxShadow: shadows.md,
   },
   emptyTemplates: { fontSize: typography.sizes.xs, color: colors.textSecondary, fontStyle: 'italic', marginTop: spacing.md, marginBottom: 0 },
   gridWrapper: {

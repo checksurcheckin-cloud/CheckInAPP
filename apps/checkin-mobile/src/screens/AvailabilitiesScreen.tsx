@@ -49,6 +49,14 @@ function weekRangeLabel(start: Date): string {
   return `${start.getDate()} au ${end.getDate()} ${MONTHS[end.getMonth()]}`;
 }
 
+// Jour strictement antérieur à aujourd'hui (aujourd'hui reste modifiable) —
+// on ne déclare pas d'indisponibilité, ni n'en retire, sur un jour passé.
+function isPastDay(date: Date): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date.getTime() < today.getTime();
+}
+
 // "YYYY-MM-DD" en heure locale (pas .toISOString(), qui bascule sur le jour
 // civil précédent pour un fuseau à décalage négatif) — le format attendu par
 // CreateAvailabilityDto.specificDate (@IsDateString()).
@@ -207,6 +215,7 @@ export function AvailabilitiesScreen() {
   // indisponibilité ponctuelle, il n'y a plus besoin d'établir quoi que ce
   // soit pour le rendre disponible puisqu'il l'est déjà.
   const toggleDay = async (day: number) => {
+    if (isPastDay(weekDates[day])) return;
     const recurring = recordForDay.get(day);
     const override = overrideForDay.get(day);
     const effective = override ?? recurring;
@@ -309,6 +318,7 @@ export function AvailabilitiesScreen() {
   // déjà déclaré s'il y en a un (exception ponctuelle si elle existe, sinon
   // la récurrence active), sinon "à partir de 12:00" par défaut.
   const startEditingUnavailableRange = (day: number) => {
+    if (isPastDay(weekDates[day])) return;
     const effective = overrideForDay.get(day) ?? recordForDay.get(day);
     if (effective && !isFullDayBlock(effective)) {
       const { mode, time } = describeUnavailableRange(effective);
@@ -336,7 +346,7 @@ export function AvailabilitiesScreen() {
   // ni l'autre, crée une exception ponctuelle pour le jour affiché — jamais
   // la récurrence, cohérent avec toggleDay.
   const saveEditing = async () => {
-    if (editingDay === null) return;
+    if (editingDay === null || isPastDay(weekDates[editingDay])) return;
     setBanner(null);
     const target = overrideForDay.get(editingDay) ?? recordForDay.get(editingDay);
     const payload =
@@ -364,6 +374,7 @@ export function AvailabilitiesScreen() {
   // est supprimée : elle serait redondante avec la récurrence qui couvre
   // désormais ce jour de toute façon.
   const applyRecurringFullDayBlock = async (day: number) => {
+    if (isPastDay(weekDates[day])) return;
     const override = overrideForDay.get(day);
     const recurring = recordForDay.get(day);
     setBusyDay(day);
@@ -419,7 +430,8 @@ export function AvailabilitiesScreen() {
           const available = effective?.isAvailable ?? true;
           const fullDayBlock = isFullDayBlock(effective);
           const busy = busyDay === day;
-          const editing = editingDay === day;
+          const past = isPastDay(weekDates[day]);
+          const editing = editingDay === day && !past;
           // Signe distinctif : l'indisponibilité affichée vient bien de la
           // récurrence (pas d'exception ponctuelle qui la masquerait cette
           // semaine) — utile dès qu'on navigue au-delà de la semaine où elle
@@ -431,16 +443,19 @@ export function AvailabilitiesScreen() {
           const isRecurringPaused = Boolean(available && override && record && !record.isAvailable);
 
           return (
-            <View key={label} style={[styles.dayCard, editing && styles.dayCardEditing, !available && styles.dayCardOff]}>
+            <View
+              key={label}
+              style={[styles.dayCard, editing && styles.dayCardEditing, !available && styles.dayCardOff, past && styles.dayCardPast]}
+            >
               <View style={styles.dayRow}>
                 <View>
                   <Text style={styles.dayName}>{label}</Text>
                   <Pressable
                     style={styles.toggle}
-                    disabled={busy}
+                    disabled={busy || past}
                     onPress={() => toggleDay(day)}
                     accessibilityRole="switch"
-                    accessibilityState={{ checked: available }}
+                    accessibilityState={{ checked: available, disabled: busy || past }}
                   >
                     {busy ? (
                       <ActivityIndicator size="small" color={colors.textSecondary} />
@@ -452,7 +467,20 @@ export function AvailabilitiesScreen() {
                   </Pressable>
                 </View>
 
-                {available ? (
+                {past ? (
+                  // Lecture seule : on montre ce qui était déclaré, sans
+                  // lien d'édition ni de récurrence.
+                  <View style={styles.availableCol}>
+                    <Text style={available ? styles.onLabel : styles.offLabel}>
+                      {available
+                        ? 'Disponible'
+                        : fullDayBlock
+                          ? 'Indisponible'
+                          : describeUnavailableRange(effective!).label}
+                    </Text>
+                    <Text style={styles.pastNote}>Jour passé</Text>
+                  </View>
+                ) : available ? (
                   <View style={styles.availableCol}>
                     <Text style={styles.onLabel}>Disponible</Text>
                     {isRecurringPaused ? <Text style={styles.pausedNote}>Exception cette semaine</Text> : null}
@@ -623,6 +651,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   dayCardOff: { opacity: 0.62 },
+  dayCardPast: { opacity: 0.45, backgroundColor: colors.background },
 
   dayRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   dayName: { fontFamily: fonts.displaySemiBold, fontSize: 14.5, color: colors.textPrimary, marginBottom: 8 },
@@ -636,6 +665,7 @@ const styles = StyleSheet.create({
   availableCol: { alignItems: 'flex-end', gap: 2 },
   onLabel: { fontSize: 12.5, color: colors.textPrimary, fontWeight: '600' },
   pausedNote: { fontSize: 10.5, color: colors.primary, fontWeight: '600' },
+  pastNote: { fontSize: 10.5, color: colors.textSecondary, fontWeight: '600' },
   offLabel: { fontSize: 12.5, color: colors.textSecondary, fontWeight: '600' },
   offLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   unavailableCol: { alignItems: 'flex-end', gap: 4 },

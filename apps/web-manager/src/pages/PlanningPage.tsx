@@ -118,9 +118,14 @@ export function PlanningPage() {
     loadAvailabilities();
   }, [loadAvailabilities]);
 
-  const load = useCallback(async () => {
+  // `silent` : refetch après une action sur la grille (dépose, édition,
+  // publication) ou un événement temps réel — on garde la grille affichée
+  // au lieu de la remplacer par « Chargement… », ce qui la démontait et
+  // faisait perdre la position de défilement. Le chargement visible est
+  // réservé au premier affichage et aux changements de site/semaine/mois.
+  const load = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
     if (!selectedSiteId) return;
-    setIsLoading(true);
+    if (!silent) setIsLoading(true);
     try {
       // On charge toute la semaine même en scope "Jour" (juste un filtrage
       // d'affichage) — pas de refetch au moment de basculer le sélecteur.
@@ -134,7 +139,7 @@ export function PlanningPage() {
       });
       setShifts(list);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, [selectedSiteId, weekStart, viewMode, monthAnchor]);
 
@@ -148,7 +153,7 @@ export function PlanningPage() {
   // payload partiel (voir realtime.gateway.ts côté backend).
   useEffect(() => {
     if (!socket) return;
-    const onShiftsChanged = () => void load();
+    const onShiftsChanged = () => void load({ silent: true });
     const onAvailabilitiesChanged = () => loadAvailabilities();
     socket.on('shifts:changed', onShiftsChanged);
     socket.on('availabilities:changed', onAvailabilitiesChanged);
@@ -198,7 +203,7 @@ export function PlanningPage() {
     setBusyId(shiftId);
     try {
       await apiClient.deleteShift(shiftId);
-      await load();
+      await load({ silent: true });
     } finally {
       setBusyId(null);
     }
@@ -217,7 +222,7 @@ export function PlanningPage() {
         roleNeeded: shift.roleNeeded,
         status: shift.status,
       });
-      await load();
+      await load({ silent: true });
     } finally {
       setBusyId(null);
     }
@@ -228,14 +233,14 @@ export function PlanningPage() {
     payload: { siteId: string; startsAt: string; endsAt: string; roleNeeded?: string; status: Shift['status'] },
   ) => {
     await apiClient.updateShift(shiftId, payload);
-    await load();
+    await load({ silent: true });
   };
 
   const assignEmployee = async (shiftId: string, userId: string) => {
     setBusyId(shiftId);
     try {
       await apiClient.assignShift(shiftId, userId);
-      await load();
+      await load({ silent: true });
     } catch (err) {
       // Le backend refuse un employé déjà sur un shift qui chevauche celui-ci
       // dans le temps (409), ou une assignation en dehors de sa disponibilité
@@ -283,7 +288,7 @@ export function PlanningPage() {
       if (targetEmployeeId && targetEmployeeId !== currentAssigneeId) {
         await apiClient.assignShift(shiftId, targetEmployeeId);
       }
-      await load();
+      await load({ silent: true });
     } catch (err) {
       setConflictMessage(err instanceof ApiError ? err.message : 'Impossible de déplacer ce shift');
     } finally {
@@ -322,6 +327,10 @@ export function PlanningPage() {
       // resolveShiftColors (voir lib/shiftColor.ts).
       const sourceTemplate = templates.find((t) => t.id === template.templateId);
       if (sourceTemplate) assignInheritedShiftColor(created.id, sourceTemplate.paletteIndex);
+      // Déposé sur « Shifts disponibles » : affiché tout de suite, sans
+      // attendre le refetch silencieux. Pas pour une ligne employé — il
+      // apparaîtrait un instant dans la ligne libre avant l'assignation.
+      if (!targetEmployeeId) setShifts((current) => [...current, created]);
       if (targetEmployeeId) {
         try {
           await apiClient.assignShift(created.id, targetEmployeeId);
@@ -331,7 +340,7 @@ export function PlanningPage() {
           );
         }
       }
-      await load();
+      await load({ silent: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Échec de la création du shift');
     }
@@ -341,7 +350,7 @@ export function PlanningPage() {
     setBusyId(shiftId);
     try {
       await apiClient.updateShift(shiftId, { status: 'published' });
-      await load();
+      await load({ silent: true });
     } finally {
       setBusyId(null);
     }
@@ -357,7 +366,7 @@ export function PlanningPage() {
     setIsPublishing(true);
     try {
       await Promise.all(draftIds.map((id) => apiClient.updateShift(id, { status: 'published' })));
-      await load();
+      await load({ silent: true });
     } finally {
       setIsPublishing(false);
     }

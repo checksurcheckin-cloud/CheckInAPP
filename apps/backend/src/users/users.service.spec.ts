@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -15,6 +15,7 @@ describe('UsersService', () => {
       findUnique: jest.Mock;
       create: jest.Mock;
       update: jest.Mock;
+      count: jest.Mock;
     };
     site: {
       findFirst: jest.Mock;
@@ -32,6 +33,7 @@ describe('UsersService', () => {
         findUnique: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        count: jest.fn(),
       },
       site: {
         findFirst: jest.fn(),
@@ -91,7 +93,7 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue(null);
 
     await expect(
-      service.updateRole('company-a', 'user-of-company-b', { role: 'manager' as any }),
+      service.updateRole('company-a', 'user-of-company-b', { role: 'manager' as any }, 'admin'),
     ).rejects.toThrow(NotFoundException);
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
@@ -100,7 +102,7 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue(null);
 
     await expect(
-      service.updateStatus('company-a', 'user-of-company-b', { status: 'active' as any }),
+      service.updateStatus('company-a', 'user-of-company-b', { status: 'active' as any }, 'admin'),
     ).rejects.toThrow(NotFoundException);
     expect(prisma.user.update).not.toHaveBeenCalled();
   });
@@ -109,7 +111,7 @@ describe('UsersService', () => {
     prisma.user.findFirst.mockResolvedValue({ id: 'user-1', companyId: 'company-a' });
     prisma.user.update.mockResolvedValue({ id: 'user-1', status: 'active' });
 
-    await service.updateStatus('company-a', 'user-1', { status: 'active' as any });
+    await service.updateStatus('company-a', 'user-1', { status: 'active' as any }, 'manager');
 
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
@@ -228,7 +230,7 @@ describe('UsersService', () => {
         email: 'taken@example.com',
         firstName: 'A',
         lastName: 'B',
-      }),
+      }, 'manager'),
     ).rejects.toThrow(ConflictException);
     expect(prisma.user.create).not.toHaveBeenCalled();
   });
@@ -241,7 +243,7 @@ describe('UsersService', () => {
       email: 'new@example.com',
       firstName: 'A',
       lastName: 'B',
-    });
+    }, 'manager');
 
     const call = prisma.user.create.mock.calls[0][0];
     expect(call.data.companyId).toBe('company-a');
@@ -258,7 +260,7 @@ describe('UsersService', () => {
         firstName: 'A',
         lastName: 'B',
         siteId: 'site-of-company-b',
-      }),
+      }, 'manager'),
     ).rejects.toThrow(NotFoundException);
     expect(prisma.user.create).not.toHaveBeenCalled();
   });
@@ -273,10 +275,100 @@ describe('UsersService', () => {
       firstName: 'A',
       lastName: 'B',
       siteId: 'site-1',
-    });
+    }, 'manager');
 
     const call = prisma.user.create.mock.calls[0][0];
     expect(call.data.siteId).toBe('site-1');
+  });
+
+  describe('admin role protection', () => {
+    const admin = { id: 'admin-1', companyId: 'company-a', role: 'admin', status: 'active' };
+    const employee = { id: 'user-1', companyId: 'company-a', role: 'employee', status: 'active' };
+
+    it('forbids a manager from inviting an admin', async () => {
+      await expect(
+        service.invite('company-a', { email: 'x@example.com', firstName: 'A', lastName: 'B', role: 'admin' as any }, 'manager'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('lets an admin invite an admin', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.create.mockResolvedValue({ id: 'new-admin' });
+
+      await service.invite('company-a', { email: 'x@example.com', firstName: 'A', lastName: 'B', role: 'admin' as any }, 'admin');
+
+      expect(prisma.user.create.mock.calls[0][0].data.role).toBe('admin');
+    });
+
+    it('forbids a manager from promoting someone (including themselves) to admin', async () => {
+      prisma.user.findFirst.mockResolvedValue(employee);
+
+      await expect(service.updateRole('company-a', 'user-1', { role: 'admin' as any }, 'manager')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('forbids a manager from demoting an admin', async () => {
+      prisma.user.findFirst.mockResolvedValue(admin);
+
+      await expect(service.updateRole('company-a', 'admin-1', { role: 'employee' as any }, 'manager')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('forbids a manager from changing the status of an admin', async () => {
+      prisma.user.findFirst.mockResolvedValue(admin);
+
+      await expect(service.updateStatus('company-a', 'admin-1', { status: 'disabled' as any }, 'manager')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('still lets a manager change roles between employee and manager', async () => {
+      prisma.user.findFirst.mockResolvedValue(employee);
+      prisma.user.update.mockResolvedValue({ ...employee, role: 'manager' });
+
+      await service.updateRole('company-a', 'user-1', { role: 'manager' as any }, 'manager');
+
+      expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({ data: { role: 'manager' } }));
+    });
+
+    it('refuses to demote the last active admin, even for an admin', async () => {
+      prisma.user.findFirst.mockResolvedValue(admin);
+      prisma.user.count.mockResolvedValue(0);
+
+      await expect(service.updateRole('company-a', 'admin-1', { role: 'manager' as any }, 'admin')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prisma.user.count).toHaveBeenCalledWith({
+        where: { companyId: 'company-a', role: 'admin', status: 'active', id: { not: 'admin-1' } },
+      });
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses to disable the last active admin', async () => {
+      prisma.user.findFirst.mockResolvedValue(admin);
+      prisma.user.count.mockResolvedValue(0);
+
+      await expect(service.updateStatus('company-a', 'admin-1', { status: 'disabled' as any }, 'admin')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('lets an admin demote another admin when one active admin remains', async () => {
+      prisma.user.findFirst.mockResolvedValue(admin);
+      prisma.user.count.mockResolvedValue(1);
+      prisma.user.update.mockResolvedValue({ ...admin, role: 'manager' });
+
+      await service.updateRole('company-a', 'admin-1', { role: 'manager' as any }, 'admin');
+
+      expect(prisma.user.update).toHaveBeenCalled();
+    });
   });
 
   describe('resolveByPin', () => {

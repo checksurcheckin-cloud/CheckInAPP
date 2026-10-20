@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -62,7 +62,10 @@ export class UsersService {
     return user;
   }
 
-  async invite(companyId: string, dto: InviteUserDto) {
+  async invite(companyId: string, dto: InviteUserDto, actorRole: string) {
+    if (dto.role === 'admin' && actorRole !== 'admin') {
+      throw new ForbiddenException('Seul un admin peut inviter un admin');
+    }
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existing) {
       throw new ConflictException('Un compte existe déjà avec cet email');
@@ -91,6 +94,19 @@ export class UsersService {
     });
   }
 
+  // Une entreprise doit toujours garder au moins un admin actif — sinon plus
+  // personne ne peut modifier ses réglages (routes @Roles('admin')) ni
+  // rétablir un admin, puisque seul un admin peut attribuer ce rôle.
+  private async ensureNotLastActiveAdmin(companyId: string, target: { id: string; status: string }) {
+    if (target.status !== 'active') return;
+    const otherActiveAdmins = await this.prisma.user.count({
+      where: { companyId, role: 'admin', status: 'active', id: { not: target.id } },
+    });
+    if (otherActiveAdmins === 0) {
+      throw new ConflictException("Impossible : c'est le dernier admin actif de l'entreprise");
+    }
+  }
+
   // Jamais faire confiance à un siteId fourni par le client sans vérifier
   // qu'il appartient bien à la même entreprise (règle critique décision #1) —
   // sinon un manager pourrait rattacher un employé au site d'une AUTRE
@@ -102,8 +118,14 @@ export class UsersService {
     }
   }
 
-  async updateRole(companyId: string, id: string, dto: UpdateUserRoleDto) {
-    await this.findOne(companyId, id);
+  async updateRole(companyId: string, id: string, dto: UpdateUserRoleDto, actorRole: string) {
+    const target = await this.findOne(companyId, id);
+    if (actorRole !== 'admin' && (target.role === 'admin' || dto.role === 'admin')) {
+      throw new ForbiddenException('Seul un admin peut attribuer ou retirer le rôle admin');
+    }
+    if (target.role === 'admin' && dto.role !== 'admin') {
+      await this.ensureNotLastActiveAdmin(companyId, target);
+    }
     return this.prisma.user.update({
       where: { id },
       data: { role: dto.role },
@@ -114,8 +136,14 @@ export class UsersService {
   // Pas encore de flow "accepter l'invitation" (voir CLAUDE.md, "Connu
   // manquant") — en attendant, un manager peut faire passer un compte
   // `invited` à `active` (ou `disabled` pour un départ) directement.
-  async updateStatus(companyId: string, id: string, dto: UpdateUserStatusDto) {
-    await this.findOne(companyId, id);
+  async updateStatus(companyId: string, id: string, dto: UpdateUserStatusDto, actorRole: string) {
+    const target = await this.findOne(companyId, id);
+    if (actorRole !== 'admin' && target.role === 'admin') {
+      throw new ForbiddenException("Seul un admin peut modifier le statut d'un admin");
+    }
+    if (target.role === 'admin' && dto.status !== 'active') {
+      await this.ensureNotLastActiveAdmin(companyId, target);
+    }
     return this.prisma.user.update({
       where: { id },
       data: { status: dto.status },

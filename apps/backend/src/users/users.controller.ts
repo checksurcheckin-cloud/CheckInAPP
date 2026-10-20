@@ -48,7 +48,7 @@ export class UsersController {
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
   invite(@CurrentUser() user: AuthenticatedUser, @Body() dto: InviteUserDto) {
-    return this.usersService.invite(user.companyId, dto);
+    return this.usersService.invite(user.companyId, dto, user.role);
   }
 
   @Patch(':id/role')
@@ -59,7 +59,7 @@ export class UsersController {
     @Param('id') id: string,
     @Body() dto: UpdateUserRoleDto,
   ) {
-    return this.usersService.updateRole(user.companyId, id, dto);
+    return this.usersService.updateRole(user.companyId, id, dto, user.role);
   }
 
   @Patch(':id/status')
@@ -70,7 +70,7 @@ export class UsersController {
     @Param('id') id: string,
     @Body() dto: UpdateUserStatusDto,
   ) {
-    return this.usersService.updateStatus(user.companyId, id, dto);
+    return this.usersService.updateStatus(user.companyId, id, dto, user.role);
   }
 
   @Post(':id/badge/regenerate')

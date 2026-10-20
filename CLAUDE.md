@@ -695,6 +695,35 @@ Cible : PME de 20-100 employés par site.
       `position: sticky` pour qu'elles ne quittent jamais l'écran (mise de
       côté sans suite donnée). L'écran actuel n'a ni l'un ni l'autre.
 
+29. **Pointage par PIN sur la tablette = login classique : choix du nom, puis
+    PIN à 4 chiffres généré automatiquement et relisible.**
+    - checkin-pos `PinEntryScreen` : l'employé choisit son nom dans
+      l'annuaire du site (`GET /site-devices/employees`, device authentifié —
+      rattachés au site du device ou sans site, non désactivés, avec un PIN ;
+      jamais d'email ni de PIN dans la réponse), puis tape son PIN, validé au
+      4e chiffre. `POST /time-entries/device` (`source: 'pin_code'`) exige
+      désormais `userId` + `pin` ; `UsersService.verifyPin` rescope le
+      `userId` par `companyId` (règle #1) et bloque l'employé 5 min après 5
+      échecs consécutifs (compteur en mémoire du process — à revoir si le
+      backend passe à plusieurs instances).
+    - PIN généré à l'invitation (`randomInt`, unique dans l'entreprise),
+      stocké deux fois : `pinCodeHash` (bcrypt, seule source de vérification)
+      et `pinCodeEncrypted` (AES-256-GCM, clé `PIN_ENCRYPTION_KEY`, voir
+      `users/pin-cipher.ts`). **Choix produit explicite : PIN consultable à
+      tout moment** — par manager/admin (page Équipe, `GET /users/:id/pin`,
+      bouton « Nouveau » = `POST /users/:id/pin/regenerate`) et par
+      l'employé lui-même (profil checkin-mobile, `GET /users/me/pin`). Ne
+      jamais remplacer la vérification bcrypt par une comparaison du PIN
+      déchiffré.
+    - L'unicité par entreprise n'est plus nécessaire au pointage (le nom est
+      choisi avant), mais reste garantie pour `resolveByPin`, qui identifie
+      encore par le PIN seul pour l'enrôlement de badge.
+    - Comptes antérieurs (PIN seulement haché, donc illisible) : un nouveau
+      PIN leur est attribué au démarrage du backend
+      (`UsersService.onApplicationBootstrap` → `backfillMissingPins`,
+      idempotent, jamais bloquant si la clé manque). Changer
+      `PIN_ENCRYPTION_KEY` en prod rendrait tous les PIN illisibles.
+
 ## Stack
 
 - Backend : NestJS + PostgreSQL + Prisma + Passport/JWT

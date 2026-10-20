@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { UserPlus, RefreshCw, KeyRound } from 'lucide-react';
+import { UserPlus, RefreshCw, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { Site, User, UserRole, UserStatus } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
+import { Dialog } from '../components/Dialog';
 
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Admin',
@@ -31,7 +32,11 @@ export function TeamPage() {
   const [inviteSiteId, setInviteSiteId] = useState('');
   const [isInviting, setIsInviting] = useState(false);
 
-  const [pinDrafts, setPinDrafts] = useState<Record<string, string>>({});
+  // PIN tablette affichés en clair, par employé — masqués par défaut, lus à
+  // la demande (GET /users/:id/pin) pour ne pas les exposer à l'écran en
+  // permanence. null = compte sans PIN consultable.
+  const [revealedPins, setRevealedPins] = useState<Record<string, string | null>>({});
+  const [pinToRegenerate, setPinToRegenerate] = useState<User | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
   const load = async () => {
@@ -106,13 +111,32 @@ export function TeamPage() {
     }
   };
 
-  const setPin = async (userId: string) => {
-    const pin = pinDrafts[userId];
-    if (!pin || pin.length < 4) return;
+  const togglePin = async (userId: string) => {
+    if (userId in revealedPins) {
+      setRevealedPins(({ [userId]: _hidden, ...rest }) => rest);
+      return;
+    }
     setBusyUserId(userId);
     try {
-      await apiClient.setUserPin(userId, pin);
-      setPinDrafts((prev) => ({ ...prev, [userId]: '' }));
+      const { pin } = await apiClient.getUserPin(userId);
+      setRevealedPins((prev) => ({ ...prev, [userId]: pin }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'PIN indisponible');
+    } finally {
+      setBusyUserId(null);
+    }
+  };
+
+  // Nouveau PIN aléatoire (unique dans l'entreprise) — affiché directement
+  // pour que le manager puisse le communiquer ; l'ancien ne marche plus.
+  const regeneratePin = async (userId: string) => {
+    setPinToRegenerate(null);
+    setBusyUserId(userId);
+    try {
+      const { pin } = await apiClient.regenerateUserPin(userId);
+      setRevealedPins((prev) => ({ ...prev, [userId]: pin }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Échec de la régénération du PIN');
     } finally {
       setBusyUserId(null);
     }
@@ -297,23 +321,27 @@ export function TeamPage() {
                 </td>
                 <td style={styles.td}>
                   <div style={styles.pinRow}>
-                    <input
-                      style={styles.pinInput}
-                      placeholder="1234"
-                      maxLength={6}
-                      value={pinDrafts[u.id] ?? ''}
-                      onChange={(e) =>
-                        setPinDrafts((prev) => ({ ...prev, [u.id]: e.target.value.replace(/\D/g, '') }))
-                      }
-                    />
+                    <span style={styles.pinValue}>
+                      {u.id in revealedPins ? (revealedPins[u.id] ?? 'Aucun') : '••••'}
+                    </span>
+                    <button
+                      className="btn"
+                      style={styles.iconButton}
+                      disabled={busyUserId === u.id}
+                      onClick={() => togglePin(u.id)}
+                      aria-label={u.id in revealedPins ? 'Masquer le PIN' : 'Afficher le PIN'}
+                      title={u.id in revealedPins ? 'Masquer le PIN' : 'Afficher le PIN'}
+                    >
+                      {u.id in revealedPins ? <EyeOff size={12} strokeWidth={2.25} /> : <Eye size={12} strokeWidth={2.25} />}
+                    </button>
                     <button
                       className="btn"
                       style={styles.smallButton}
-                      disabled={busyUserId === u.id || (pinDrafts[u.id]?.length ?? 0) < 4}
-                      onClick={() => setPin(u.id)}
+                      disabled={busyUserId === u.id}
+                      onClick={() => setPinToRegenerate(u)}
                     >
                       <KeyRound size={12} strokeWidth={2.25} />
-                      Définir
+                      Nouveau
                     </button>
                   </div>
                 </td>
@@ -335,6 +363,21 @@ export function TeamPage() {
         </table>
         </div>
       )}
+
+      <Dialog
+        open={pinToRegenerate !== null}
+        variant="warning"
+        title="Générer un nouveau PIN ?"
+        message={
+          pinToRegenerate
+            ? `L'ancien PIN de ${pinToRegenerate.firstName} ${pinToRegenerate.lastName} ne fonctionnera plus sur la tablette. Le nouveau s'affichera dans la colonne PIN.`
+            : ''
+        }
+        confirmLabel="Générer"
+        cancelLabel="Annuler"
+        onConfirm={() => pinToRegenerate && regeneratePin(pinToRegenerate.id)}
+        onClose={() => setPinToRegenerate(null)}
+      />
     </div>
   );
 }
@@ -399,11 +442,21 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontSize: typography.sizes.xs,
   },
-  pinRow: { display: 'flex', gap: spacing.xs },
-  pinInput: {
-    width: 60,
+  pinRow: { display: 'flex', alignItems: 'center', gap: spacing.xs },
+  pinValue: {
+    minWidth: 40,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontWeight: 700,
+    letterSpacing: 2,
+    color: colors.textPrimary,
+  },
+  iconButton: {
+    display: 'flex',
+    alignItems: 'center',
     padding: spacing.xs,
     borderRadius: radius.sm,
     border: `1px solid ${colors.border}`,
+    backgroundColor: colors.surface,
+    cursor: 'pointer',
   },
 };

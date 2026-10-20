@@ -4,6 +4,8 @@ import type {
   Company,
   DeviceAuthResponse,
   DeviceTimeEntryResult,
+  KioskEmployee,
+  UserPin,
   GeocodeCandidate,
   OpenShiftOffer,
   PendingShiftOffer,
@@ -144,9 +146,15 @@ export class ApiClient {
     });
   }
 
-  clockInWithPin(pin: string) {
+  // Annuaire du kiosk : l'employé choisit son nom avant de taper son PIN.
+  getKioskEmployees() {
+    return this.request<KioskEmployee[]>('GET', '/site-devices/employees');
+  }
+
+  clockInWithPin(userId: string, pin: string) {
     return this.request<DeviceTimeEntryResult>('POST', '/time-entries/device', {
       source: 'pin_code',
+      userId,
       pin,
     });
   }
@@ -235,6 +243,20 @@ export class ApiClient {
 
   setUserPin(userId: string, pin: string) {
     return this.request<{ ok: true }>('POST', `/users/${userId}/pin`, { pin });
+  }
+
+  // PIN tablette relisible (managers/admins pour leur équipe, l'employé
+  // pour lui-même via getMyPin).
+  getUserPin(userId: string) {
+    return this.request<UserPin>('GET', `/users/${userId}/pin`);
+  }
+
+  regenerateUserPin(userId: string) {
+    return this.request<UserPin>('POST', `/users/${userId}/pin/regenerate`);
+  }
+
+  getMyPin() {
+    return this.request<UserPin>('GET', '/users/me/pin');
   }
 
   // Surcharge individuelle du réglage GPS et/ou site de rattachement —

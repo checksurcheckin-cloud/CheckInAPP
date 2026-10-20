@@ -33,6 +33,14 @@ export class SiteDevicesController {
     return this.siteDevicesService.enrollBadge(device.companyId, dto);
   }
 
+  // Annuaire du kiosk : l'employé choisit son nom avant de taper son PIN.
+  // Device authentifié, scopé à l'entreprise et au site du device.
+  @Get('employees')
+  @UseGuards(DeviceAuthGuard)
+  listEmployees(@CurrentDevice() device: AuthenticatedDevice) {
+    return this.siteDevicesService.listEmployees(device);
+  }
+
   @Get()
   @UseGuards(JwtAuthGuard, TenantScopeGuard)
   findAll(@CurrentUser() user: AuthenticatedUser, @Query() query: FindSiteDevicesQueryDto) {

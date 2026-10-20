@@ -105,6 +105,10 @@ model User {
   role         UserRole   @default(employee)
   status       UserStatus @default(invited)
   pinCodeHash  String?    @map("pin_code_hash")
+  // Même PIN, chiffré (AES-256-GCM, clé PIN_ENCRYPTION_KEY) — pour que le
+  // manager et l'employé puissent le relire. pinCodeHash reste la seule
+  // source de vérification au pointage.
+  pinCodeEncrypted String? @map("pin_code_encrypted")
   badgeCode    String?    @unique @map("badge_code")
   // Site "de rattachement" de l'employé — optionnel : null = pas encore
   // assigné, reste visible sur TOUS les sites du planning (voir

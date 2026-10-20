@@ -315,9 +315,11 @@ export class TimeEntriesService {
       return user;
     }
 
-    const user = await this.usersService.resolveByPin(device.companyId, dto.pin ?? '');
+    // userId vient du device (choix dans la liste du kiosk) : verifyPin le
+    // rescope par companyId avant toute vérification (règle critique #1).
+    const user = await this.usersService.verifyPin(device.companyId, dto.userId ?? '', dto.pin ?? '');
     if (!user) {
-      throw new UnauthorizedException('PIN invalide');
+      throw new UnauthorizedException('PIN incorrect');
     }
     return user;
   }

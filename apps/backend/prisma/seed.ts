@@ -1,6 +1,7 @@
 import { PrismaClient, Site } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'node:crypto';
+import { encryptPin } from '../src/users/pin-cipher';
 
 const prisma = new PrismaClient();
 const SALT_ROUNDS = 12;
@@ -185,6 +186,7 @@ async function main() {
         role: 'employee',
         status: 'active',
         pinCodeHash,
+        pinCodeEncrypted: encryptPin(pin),
         badgeCode,
         siteId,
       },

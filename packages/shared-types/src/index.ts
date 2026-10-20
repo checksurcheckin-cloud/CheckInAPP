@@ -152,6 +152,20 @@ export interface DeviceAuthResponse {
   deviceLabel: string;
 }
 
+// ---- checkin-pos : annuaire du kiosk (GET /site-devices/employees) — l'employé
+// choisit son nom puis tape son PIN, comme un login classique ----
+export interface KioskEmployee {
+  id: string;
+  firstName: string;
+  lastName: string;
+}
+
+// GET /users/:id/pin, GET /users/me/pin, POST /users/:id/pin/regenerate —
+// null = compte sans PIN consultable (à régénérer).
+export interface UserPin {
+  pin: string | null;
+}
+
 export interface DeviceTimeEntryResult extends TimeEntry {
   employee: { firstName: string; lastName: string };
 }

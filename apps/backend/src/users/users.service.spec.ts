@@ -4,6 +4,9 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { UsersService } from './users.service';
+import { decryptPin, encryptPin } from './pin-cipher';
+
+process.env.PIN_ENCRYPTION_KEY = 'a'.repeat(64);
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -28,7 +31,7 @@ describe('UsersService', () => {
   beforeEach(async () => {
     prisma = {
       user: {
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn(),
         findUnique: jest.fn(),
         create: jest.fn(),
@@ -368,6 +371,127 @@ describe('UsersService', () => {
       await service.updateRole('company-a', 'admin-1', { role: 'manager' as any }, 'admin');
 
       expect(prisma.user.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('kiosk PIN', () => {
+    it('generates a 4-digit PIN on invite, stored both hashed and encrypted', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      prisma.user.create.mockResolvedValue({ id: 'new-user' });
+
+      await service.invite('company-a', { email: 'n@example.com', firstName: 'A', lastName: 'B' }, 'manager');
+
+      const { data } = prisma.user.create.mock.calls[0][0];
+      const pin = decryptPin(data.pinCodeEncrypted);
+      expect(pin).toMatch(/^\d{4}$/);
+      expect(await bcrypt.compare(pin, data.pinCodeHash)).toBe(true);
+    });
+
+    it('never reuses a PIN already given to someone else in the company', async () => {
+      // Tous les PIN pris sauf 0042 : la génération ne peut tomber que dessus.
+      const taken = Array.from({ length: 10_000 }, (_, i) => String(i).padStart(4, '0')).filter((p) => p !== '0042');
+      prisma.user.findFirst.mockResolvedValue({ id: 'user-1', companyId: 'company-a' });
+      prisma.user.findMany.mockResolvedValue(taken.map((p) => ({ pinCodeEncrypted: encryptPin(p) })));
+
+      const { pin } = await service.regeneratePin('company-a', 'user-1');
+
+      expect(pin).toBe('0042');
+      expect(prisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ companyId: 'company-a', id: { not: 'user-1' } }) }),
+      );
+    });
+
+    it('rejects a manual PIN already used by another member of the company', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'user-1', companyId: 'company-a' });
+      prisma.user.findMany.mockResolvedValue([{ pinCodeEncrypted: encryptPin('1234') }]);
+
+      await expect(service.setPin('company-a', 'user-1', { pin: '1234' })).rejects.toThrow(ConflictException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('returns the readable PIN, scoped to the caller company', async () => {
+      prisma.user.findFirst.mockResolvedValue({ pinCodeEncrypted: encryptPin('0815') });
+
+      await expect(service.getPin('company-a', 'user-1')).resolves.toEqual({ pin: '0815' });
+      expect(prisma.user.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'user-1', companyId: 'company-a' } }),
+      );
+    });
+
+    it('refuses to reveal the PIN of a user from another company', async () => {
+      prisma.user.findFirst.mockResolvedValue(null);
+
+      await expect(service.getPin('company-a', 'user-of-company-b')).rejects.toThrow(NotFoundException);
+    });
+
+    it('lists kiosk employees of the device company and site (or without site), never disabled ones', async () => {
+      await service.listKioskEmployees('company-a', 'site-a');
+
+      expect(prisma.user.findMany).toHaveBeenCalledWith({
+        where: {
+          companyId: 'company-a',
+          status: { not: 'disabled' },
+          pinCodeHash: { not: null },
+          OR: [{ siteId: 'site-a' }, { siteId: null }],
+        },
+        select: { id: true, firstName: true, lastName: true },
+        orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+      });
+    });
+
+    describe('verifyPin', () => {
+      let pinCodeHash: string;
+      beforeAll(async () => {
+        pinCodeHash = await bcrypt.hash('2468', 4);
+      });
+
+      it('accepts the right PIN for the chosen employee, scoped to the device company', async () => {
+        prisma.user.findFirst.mockResolvedValue({ id: 'user-1', badgeCode: null, firstName: 'A', lastName: 'B', pinCodeHash });
+
+        const user = await service.verifyPin('company-a', 'user-1', '2468');
+
+        expect(user).toEqual({ id: 'user-1', badgeCode: null, firstName: 'A', lastName: 'B' });
+        expect(prisma.user.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 'user-1', companyId: 'company-a', status: { not: 'disabled' } } }),
+        );
+      });
+
+      it('returns null for a wrong PIN or an employee outside the company', async () => {
+        prisma.user.findFirst.mockResolvedValueOnce({ id: 'user-1', pinCodeHash }).mockResolvedValueOnce(null);
+
+        await expect(service.verifyPin('company-a', 'user-1', '0000')).resolves.toBeNull();
+        await expect(service.verifyPin('company-a', 'user-of-company-b', '2468')).resolves.toBeNull();
+      });
+
+      it('locks the employee after 5 wrong PINs in a row, even for the right PIN', async () => {
+        prisma.user.findFirst.mockResolvedValue({ id: 'user-1', pinCodeHash });
+
+        for (let i = 0; i < 5; i++) {
+          await expect(service.verifyPin('company-a', 'user-1', '0000')).resolves.toBeNull();
+        }
+        await expect(service.verifyPin('company-a', 'user-1', '2468')).rejects.toThrow(ForbiddenException);
+      });
+
+      it('resets the failure count after a successful PIN', async () => {
+        prisma.user.findFirst.mockResolvedValue({ id: 'user-1', pinCodeHash });
+
+        for (let i = 0; i < 4; i++) await service.verifyPin('company-a', 'user-1', '0000');
+        await expect(service.verifyPin('company-a', 'user-1', '2468')).resolves.not.toBeNull();
+        await expect(service.verifyPin('company-a', 'user-1', '0000')).resolves.toBeNull();
+        await expect(service.verifyPin('company-a', 'user-1', '2468')).resolves.not.toBeNull();
+      });
+    });
+
+    it('backfills a PIN for every account without an encrypted one', async () => {
+      prisma.user.findMany
+        .mockResolvedValueOnce([{ id: 'user-1', companyId: 'company-a' }])
+        .mockResolvedValueOnce([]);
+
+      await expect(service.backfillMissingPins()).resolves.toBe(1);
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { pinCodeHash: expect.any(String), pinCodeEncrypted: expect.any(String) },
+      });
     });
   });
 

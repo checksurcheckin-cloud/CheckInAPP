@@ -39,6 +39,27 @@ export class UsersController {
     return { payload: JSON.stringify({ userId: user.userId, code }), validUntil };
   }
 
+  // Le PIN tablette de l'appelant (affiché dans son profil checkin-mobile).
+  // Déclaré avant ':id/pin' pour que 'me' ne soit pas pris pour un id.
+  @Get('me/pin')
+  getMyPin(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.getPin(user.companyId, user.userId);
+  }
+
+  @Get(':id/pin')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'manager')
+  getPin(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.usersService.getPin(user.companyId, id);
+  }
+
+  @Post(':id/pin/regenerate')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'manager')
+  regeneratePin(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.usersService.regeneratePin(user.companyId, id);
+  }
+
   @Get(':id')
   findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.usersService.findOne(user.companyId, id);

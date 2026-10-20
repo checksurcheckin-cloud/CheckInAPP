@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, typography, nativeShadow } from '@horaires/ui-tokens';
-import { useAuth } from '../services/AuthService';
+import { useFocusEffect } from '@react-navigation/native';
+import { apiClient, useAuth } from '../services/AuthService';
 import { fonts } from '../theme';
 
 const ROLE_LABELS: Record<string, string> = {
@@ -17,6 +18,20 @@ function initials(firstName?: string, lastName?: string) {
 
 export function ProfileScreen() {
   const { user, logout } = useAuth();
+  // PIN tablette (checkin-pos) — masqué par défaut, l'employé l'affiche au
+  // besoin. undefined = pas encore chargé, null = aucun PIN attribué.
+  const [pin, setPin] = useState<string | null | undefined>(undefined);
+  const [isPinVisible, setIsPinVisible] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      setIsPinVisible(false);
+      apiClient
+        .getMyPin()
+        .then(({ pin: value }) => setPin(value))
+        .catch(() => setPin(null));
+    }, []),
+  );
 
   const confirmLogout = () => {
     Alert.alert('Se déconnecter', 'Voulez-vous vraiment vous déconnecter ?', [
@@ -42,6 +57,26 @@ export function ProfileScreen() {
             <Text style={styles.roleBadgeText}>{ROLE_LABELS[user.role] ?? user.role}</Text>
           </View>
         ) : null}
+      </View>
+
+      <View style={styles.pinCard}>
+        <View style={styles.pinText}>
+          <Text style={styles.pinLabel}>Code PIN tablette</Text>
+          <Text style={styles.pinHelper}>Pour pointer sur la tablette sans votre téléphone.</Text>
+        </View>
+        {pin === undefined ? null : pin === null ? (
+          <Text style={styles.pinMissing}>Demandez-le à votre manager</Text>
+        ) : (
+          <Pressable
+            style={styles.pinReveal}
+            onPress={() => setIsPinVisible((visible) => !visible)}
+            accessibilityRole="button"
+            accessibilityLabel={isPinVisible ? 'Masquer le PIN' : 'Afficher le PIN'}
+          >
+            <Text style={styles.pinValue}>{isPinVisible ? pin : '••••'}</Text>
+            <Ionicons name={isPinVisible ? 'eye-off-outline' : 'eye-outline'} size={18} color={colors.textSecondary} />
+          </Pressable>
+        )}
       </View>
 
       <Pressable style={styles.logoutBtn} onPress={confirmLogout}>
@@ -87,6 +122,23 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
   },
   roleBadgeText: { fontSize: 12, fontWeight: '700', color: colors.primary },
+
+  pinCard: {
+    marginTop: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    ...nativeShadow.sm,
+  },
+  pinText: { flex: 1 },
+  pinLabel: { fontFamily: fonts.displaySemiBold, fontSize: typography.sizes.md, color: colors.textPrimary },
+  pinHelper: { fontSize: typography.sizes.xs, color: colors.textSecondary, marginTop: 2 },
+  pinMissing: { fontSize: typography.sizes.xs, color: colors.textSecondary, maxWidth: 120, textAlign: 'right' },
+  pinReveal: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, paddingHorizontal: 4 },
+  pinValue: { fontFamily: fonts.display, fontSize: 22, letterSpacing: 4, color: colors.textPrimary },
 
   logoutBtn: {
     marginTop: spacing.xl,

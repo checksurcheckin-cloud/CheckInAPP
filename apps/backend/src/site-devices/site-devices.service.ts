@@ -6,6 +6,7 @@ import { UsersService } from '../users/users.service';
 import { CreateSiteDeviceDto } from './dto/create-site-device.dto';
 import { AuthenticateDeviceDto } from './dto/authenticate-device.dto';
 import { EnrollBadgeDto } from './dto/enroll-badge.dto';
+import { AuthenticatedDevice } from './current-device.decorator';
 
 interface DeviceJwtPayload {
   deviceId: string;
@@ -67,6 +68,10 @@ export class SiteDevicesService {
     });
 
     return { deviceToken, siteId: device.siteId, deviceLabel: device.deviceLabel };
+  }
+
+  listEmployees(device: AuthenticatedDevice) {
+    return this.usersService.listKioskEmployees(device.companyId, device.siteId);
   }
 
   // Un employé identifié par son PIN peut lier un nouveau badge à son compte

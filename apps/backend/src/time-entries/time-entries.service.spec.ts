@@ -14,7 +14,7 @@ describe('TimeEntriesService', () => {
     siteDevice: { findFirst: jest.Mock };
     timeEntry: { create: jest.Mock; findMany: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
   };
-  let usersService: { resolveByPin: jest.Mock };
+  let usersService: { resolveByPin: jest.Mock; verifyPin: jest.Mock };
   let rotatingQrService: { decodePayload: jest.Mock; verifyCode: jest.Mock };
   let realtime: { emitToCompany: jest.Mock };
 
@@ -30,7 +30,7 @@ describe('TimeEntriesService', () => {
         update: jest.fn(),
       },
     };
-    usersService = { resolveByPin: jest.fn() };
+    usersService = { resolveByPin: jest.fn(), verifyPin: jest.fn() };
     rotatingQrService = { decodePayload: jest.fn(), verifyCode: jest.fn() };
     realtime = { emitToCompany: jest.fn() };
 
@@ -87,11 +87,12 @@ describe('TimeEntriesService', () => {
     });
 
     it('rejects a wrong/unknown PIN without creating an entry', async () => {
-      usersService.resolveByPin.mockResolvedValue(null);
+      usersService.verifyPin.mockResolvedValue(null);
 
       await expect(
         service.createFromDevice(device, {
           source: 'pin_code',
+          userId: 'user-1',
           pin: '0000',
         }),
       ).rejects.toThrow(UnauthorizedException);
@@ -99,11 +100,11 @@ describe('TimeEntriesService', () => {
     });
 
     it('defaults to clock_in when the employee has no prior clock event at this site', async () => {
-      usersService.resolveByPin.mockResolvedValue({ id: 'user-1', firstName: 'A', lastName: 'B' });
+      usersService.verifyPin.mockResolvedValue({ id: 'user-1', firstName: 'A', lastName: 'B' });
       prisma.timeEntry.findFirst.mockResolvedValue(null);
       prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
 
-      await service.createFromDevice(device, { source: 'pin_code', pin: '4321' });
+      await service.createFromDevice(device, { source: 'pin_code', userId: 'user-1', pin: '4321' });
 
       expect(prisma.timeEntry.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ type: 'clock_in' }),
@@ -111,11 +112,11 @@ describe('TimeEntriesService', () => {
     });
 
     it('flips to clock_out when the last event at this site was a clock_in', async () => {
-      usersService.resolveByPin.mockResolvedValue({ id: 'user-1', firstName: 'A', lastName: 'B' });
+      usersService.verifyPin.mockResolvedValue({ id: 'user-1', firstName: 'A', lastName: 'B' });
       prisma.timeEntry.findFirst.mockResolvedValue({ type: 'clock_in' });
       prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
 
-      await service.createFromDevice(device, { source: 'pin_code', pin: '4321' });
+      await service.createFromDevice(device, { source: 'pin_code', userId: 'user-1', pin: '4321' });
 
       expect(prisma.timeEntry.findFirst).toHaveBeenCalledWith({
         where: { userId: 'user-1', siteId: 'site-a', type: { in: ['clock_in', 'clock_out'] } },
@@ -127,17 +128,19 @@ describe('TimeEntriesService', () => {
       });
     });
 
-    it('identifies the employee by PIN alone, scoped to the device companyId', async () => {
-      usersService.resolveByPin.mockResolvedValue({ id: 'user-1', badgeCode: null });
+    it('checks the PIN of the employee chosen on the kiosk, scoped to the device companyId', async () => {
+      usersService.verifyPin.mockResolvedValue({ id: 'user-1', badgeCode: null });
       prisma.timeEntry.findFirst.mockResolvedValue({ type: 'clock_in' });
       prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
 
       await service.createFromDevice(device, {
         source: 'pin_code',
+        userId: 'user-1',
         pin: '4321',
       });
 
-      expect(usersService.resolveByPin).toHaveBeenCalledWith('company-a', '4321');
+      expect(usersService.verifyPin).toHaveBeenCalledWith('company-a', 'user-1', '4321');
+      expect(usersService.resolveByPin).not.toHaveBeenCalled();
       expect(prisma.timeEntry.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ userId: 'user-1', source: 'pin_code' }),
       });

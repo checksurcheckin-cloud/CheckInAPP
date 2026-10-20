@@ -98,7 +98,16 @@ export function PresenceLivePage() {
     if (!silent) setIsLoading(true);
     try {
       const list = await apiClient.getPresence(siteId);
-      setPresent(list);
+      // Un backend pas encore redéployé renvoie l'ancien format (présents
+      // seulement, sans status/entries) — on complète plutôt que de planter.
+      setPresent(
+        list.map((e) => ({
+          ...e,
+          status: e.status ?? 'present',
+          breakSince: e.breakSince ?? null,
+          entries: e.entries ?? [{ type: 'clock_in', timestamp: e.since, source: e.source }],
+        })),
+      );
     } finally {
       if (!silent) setIsLoading(false);
     }

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { UserPlus, RefreshCw, KeyRound } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { Site, User, UserRole, UserStatus } from '@horaires/shared-types';
-import { apiClient } from '../services/AuthService';
+import { apiClient, useAuth } from '../services/AuthService';
 
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Admin',
@@ -17,6 +17,8 @@ const STATUS_LABELS: Record<UserStatus, string> = {
 };
 
 export function TeamPage() {
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === 'admin';
   const [users, setUsers] = useState<User[]>([]);
   const [sites, setSites] = useState<Site[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -141,6 +143,19 @@ export function TeamPage() {
     }
   };
 
+  // Rôle admin et comptes admin réservés aux admins — un manager ne peut ni
+  // promouvoir quelqu'un admin, ni modifier le rôle/statut d'un admin. Et on
+  // ne retire jamais son rôle ou son accès au dernier admin actif de
+  // l'entreprise (sinon plus personne ne peut changer les réglages réservés).
+  // ATTENTION : masquage d'interface seulement — l'API PATCH /users/:id/role
+  // et /status l'accepte toujours d'un manager (pas de garde backend).
+  const activeAdminCount = users.filter((u) => u.role === 'admin' && u.status === 'active').length;
+  const canEditAccess = (u: User) => {
+    if (u.role !== 'admin') return true;
+    if (!isAdmin) return false;
+    return !(u.status === 'active' && activeAdminCount <= 1);
+  };
+
   return (
     <div>
       <h1 style={styles.title}>Équipe</h1>
@@ -217,16 +232,20 @@ export function TeamPage() {
                 </td>
                 <td style={styles.td}>{u.email}</td>
                 <td style={styles.td}>
-                  <select
-                    style={styles.inlineSelect}
-                    value={u.role}
-                    disabled={busyUserId === u.id}
-                    onChange={(e) => changeRole(u.id, e.target.value as UserRole)}
-                  >
-                    <option value="employee">{ROLE_LABELS.employee}</option>
-                    <option value="manager">{ROLE_LABELS.manager}</option>
-                    <option value="admin">{ROLE_LABELS.admin}</option>
-                  </select>
+                  {canEditAccess(u) ? (
+                    <select
+                      style={styles.inlineSelect}
+                      value={u.role}
+                      disabled={busyUserId === u.id}
+                      onChange={(e) => changeRole(u.id, e.target.value as UserRole)}
+                    >
+                      <option value="employee">{ROLE_LABELS.employee}</option>
+                      <option value="manager">{ROLE_LABELS.manager}</option>
+                      {isAdmin ? <option value="admin">{ROLE_LABELS.admin}</option> : null}
+                    </select>
+                  ) : (
+                    <span title={isAdmin ? 'Dernier admin actif' : 'Réservé aux admins'}>{ROLE_LABELS[u.role]}</span>
+                  )}
                 </td>
                 <td style={styles.td}>
                   {/* Managers/admins supervisent tous les sites — pas de
@@ -250,16 +269,20 @@ export function TeamPage() {
                   )}
                 </td>
                 <td style={styles.td}>
-                  <select
-                    style={styles.inlineSelect}
-                    value={u.status}
-                    disabled={busyUserId === u.id}
-                    onChange={(e) => changeStatus(u.id, e.target.value as UserStatus)}
-                  >
-                    <option value="invited">{STATUS_LABELS.invited}</option>
-                    <option value="active">{STATUS_LABELS.active}</option>
-                    <option value="disabled">{STATUS_LABELS.disabled}</option>
-                  </select>
+                  {canEditAccess(u) ? (
+                    <select
+                      style={styles.inlineSelect}
+                      value={u.status}
+                      disabled={busyUserId === u.id}
+                      onChange={(e) => changeStatus(u.id, e.target.value as UserStatus)}
+                    >
+                      <option value="invited">{STATUS_LABELS.invited}</option>
+                      <option value="active">{STATUS_LABELS.active}</option>
+                      <option value="disabled">{STATUS_LABELS.disabled}</option>
+                    </select>
+                  ) : (
+                    <span title={isAdmin ? 'Dernier admin actif' : 'Réservé aux admins'}>{STATUS_LABELS[u.status]}</span>
+                  )}
                 </td>
                 <td style={styles.td}>
                   <button

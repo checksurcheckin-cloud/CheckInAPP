@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { MapPin, Plus, Search, Trash2, Pencil, X } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { GeocodeCandidate, Site } from '@horaires/shared-types';
-import { apiClient } from '../services/AuthService';
+import { apiClient, useAuth } from '../services/AuthService';
 
 type FormState = {
   name: string;
@@ -14,6 +14,10 @@ type FormState = {
 const EMPTY_FORM: FormState = { name: '', address: '', geoLat: '', geoLng: '' };
 
 export function SitesPage() {
+  // Suppression de site réservée aux admins (DELETE /sites/:id, @Roles('admin')) —
+  // inutile de proposer à un manager un bouton qui finirait en 403.
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [sites, setSites] = useState<Site[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -226,16 +230,18 @@ export function SitesPage() {
                 >
                   <Pencil size={14} strokeWidth={2.25} />
                 </button>
-                <button
-                  type="button"
-                  className="btn"
-                  style={styles.iconButton}
-                  disabled={busySiteId === site.id}
-                  onClick={() => removeSite(site.id)}
-                  aria-label="Supprimer"
-                >
-                  <Trash2 size={14} strokeWidth={2.25} color={colors.danger} />
-                </button>
+                {isAdmin ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    style={styles.iconButton}
+                    disabled={busySiteId === site.id}
+                    onClick={() => removeSite(site.id)}
+                    aria-label="Supprimer"
+                  >
+                    <Trash2 size={14} strokeWidth={2.25} color={colors.danger} />
+                  </button>
+                ) : null}
               </div>
             </div>
           ))}

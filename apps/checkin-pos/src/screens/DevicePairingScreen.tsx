@@ -61,7 +61,7 @@ export function DevicePairingScreen() {
           ) : (
             <CameraView
               style={styles.camera}
-              facing="back"
+              facing="front"
               barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
               onBarcodeScanned={handleBarcodeScanned}
             />

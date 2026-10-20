@@ -94,7 +94,7 @@ export function KioskHomeScreen({ onNavigatePin }: Props) {
           <>
             <CameraView
               style={StyleSheet.absoluteFill}
-              facing="back"
+              facing="front"
               barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
               onBarcodeScanned={handleBarcodeScanned}
             />

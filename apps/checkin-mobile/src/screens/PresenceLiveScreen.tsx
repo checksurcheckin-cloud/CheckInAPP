@@ -87,7 +87,9 @@ export function PresenceLiveScreen() {
 
   const loadPresence = useCallback(async (siteId: string) => {
     const list = await apiClient.getPresence(siteId);
-    setPresent(list);
+    // L'endpoint renvoie aussi les employés déjà repartis aujourd'hui (détail
+    // de la journée côté web-manager) — cet écran reste limité aux présents.
+    setPresent(list.filter((p) => p.status !== 'left'));
   }, []);
 
   useFocusEffect(

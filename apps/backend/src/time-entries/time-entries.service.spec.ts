@@ -387,36 +387,118 @@ describe('TimeEntriesService', () => {
       );
     });
 
-    it('returns only users whose latest clock event is clock_in, with the since timestamp and clock-in method of that event', async () => {
-      const lastClockIn = new Date('2026-09-01T13:00:00.000Z');
-      prisma.site.findFirst.mockResolvedValue({ id: 'site-a', companyId: 'company-a', geoLat: null, geoLng: null });
-      prisma.timeEntry.findMany.mockResolvedValue([
-        { userId: 'user-1', type: 'clock_in', timestamp: new Date('2026-09-01T09:00:00.000Z'), source: 'badge_scan', geoLat: null, geoLng: null },
-        { userId: 'user-2', type: 'clock_in', timestamp: new Date('2026-09-01T09:00:00.000Z'), source: 'badge_scan', geoLat: null, geoLng: null },
-        { userId: 'user-2', type: 'clock_out', timestamp: new Date('2026-09-01T12:00:00.000Z'), source: 'badge_scan', geoLat: null, geoLng: null },
-        { userId: 'user-1', type: 'clock_out', timestamp: new Date('2026-09-01T12:30:00.000Z'), source: 'badge_scan', geoLat: null, geoLng: null },
-        { userId: 'user-1', type: 'clock_in', timestamp: lastClockIn, source: 'qr_scan_own_phone', geoLat: null, geoLng: null },
+    // 2026-09-01 15:00 à Bruxelles (UTC+2 en été) — le jour civil du site
+    // commence donc à 2026-08-31T22:00:00Z.
+    const now = new Date('2026-09-01T13:00:00.000Z');
+    const brusselsSite = { id: 'site-a', companyId: 'company-a', timezone: 'Europe/Brussels', geoLat: null, geoLng: null };
+    const at = (iso: string) => new Date(iso);
+    const clock = (userId: string, type: string, iso: string, source = 'badge_scan') => ({
+      userId,
+      type,
+      timestamp: at(iso),
+      source,
+      geoLat: null,
+      geoLng: null,
+    });
+
+    it('returns present users and users who already left today, with status, last clock-in and the day entries', async () => {
+      prisma.site.findFirst.mockResolvedValue(brusselsSite);
+      prisma.timeEntry.findMany
+        .mockResolvedValueOnce([
+          clock('user-1', 'clock_in', '2026-09-01T07:00:00.000Z'),
+          clock('user-2', 'clock_in', '2026-09-01T06:00:00.000Z'),
+          clock('user-2', 'clock_out', '2026-09-01T10:00:00.000Z'),
+          clock('user-1', 'clock_out', '2026-09-01T10:30:00.000Z'),
+          clock('user-1', 'clock_in', '2026-09-01T11:00:00.000Z', 'qr_scan_own_phone'),
+        ])
+        .mockResolvedValueOnce([
+          { userId: 'user-2', type: 'clock_in', timestamp: at('2026-09-01T06:00:00.000Z'), source: 'badge_scan' },
+          { userId: 'user-1', type: 'clock_in', timestamp: at('2026-09-01T07:00:00.000Z'), source: 'badge_scan' },
+          { userId: 'user-2', type: 'clock_out', timestamp: at('2026-09-01T10:00:00.000Z'), source: 'badge_scan' },
+          { userId: 'user-1', type: 'clock_out', timestamp: at('2026-09-01T10:30:00.000Z'), source: 'badge_scan' },
+          { userId: 'user-1', type: 'clock_in', timestamp: at('2026-09-01T11:00:00.000Z'), source: 'qr_scan_own_phone' },
+        ]);
+      prisma.user.findMany.mockResolvedValue([
+        { id: 'user-1', firstName: 'A', lastName: 'B' },
+        { id: 'user-2', firstName: 'C', lastName: 'D' },
       ]);
+
+      const result = await service.getPresence('company-a', 'site-a', now);
+
+      expect(prisma.timeEntry.findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({ where: { siteId: 'site-a', timestamp: { gte: at('2026-08-31T22:00:00.000Z') } } }),
+      );
+      expect(result).toEqual([
+        expect.objectContaining({
+          id: 'user-1',
+          status: 'present',
+          since: at('2026-09-01T11:00:00.000Z'),
+          breakSince: null,
+          source: 'qr_scan_own_phone',
+          entries: [
+            { type: 'clock_in', timestamp: at('2026-09-01T07:00:00.000Z'), source: 'badge_scan' },
+            { type: 'clock_out', timestamp: at('2026-09-01T10:30:00.000Z'), source: 'badge_scan' },
+            { type: 'clock_in', timestamp: at('2026-09-01T11:00:00.000Z'), source: 'qr_scan_own_phone' },
+          ],
+        }),
+        expect.objectContaining({ id: 'user-2', status: 'left', since: at('2026-09-01T06:00:00.000Z') }),
+      ]);
+    });
+
+    it('excludes users who only clocked on previous days', async () => {
+      prisma.site.findFirst.mockResolvedValue(brusselsSite);
+      prisma.timeEntry.findMany
+        .mockResolvedValueOnce([
+          clock('user-1', 'clock_in', '2026-08-31T07:00:00.000Z'),
+          clock('user-1', 'clock_out', '2026-08-31T15:00:00.000Z'),
+        ])
+        .mockResolvedValueOnce([]);
+
+      const result = await service.getPresence('company-a', 'site-a', now);
+
+      expect(result).toEqual([]);
+      expect(prisma.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('reports on_break with the break start when the last break since clock-in is still open', async () => {
+      prisma.site.findFirst.mockResolvedValue(brusselsSite);
+      prisma.timeEntry.findMany
+        .mockResolvedValueOnce([clock('user-1', 'clock_in', '2026-09-01T07:00:00.000Z')])
+        .mockResolvedValueOnce([
+          { userId: 'user-1', type: 'clock_in', timestamp: at('2026-09-01T07:00:00.000Z'), source: 'badge_scan' },
+          { userId: 'user-1', type: 'break_start', timestamp: at('2026-09-01T10:00:00.000Z'), source: 'badge_scan' },
+          { userId: 'user-1', type: 'break_end', timestamp: at('2026-09-01T10:30:00.000Z'), source: 'badge_scan' },
+          { userId: 'user-1', type: 'break_start', timestamp: at('2026-09-01T12:30:00.000Z'), source: 'badge_scan' },
+        ]);
       prisma.user.findMany.mockResolvedValue([{ id: 'user-1', firstName: 'A', lastName: 'B' }]);
 
-      const result = await service.getPresence('company-a', 'site-a');
+      const [result] = await service.getPresence('company-a', 'site-a', now);
 
-      expect(prisma.user.findMany).toHaveBeenCalledWith({
-        where: { id: { in: ['user-1'] } },
-        select: { id: true, firstName: true, lastName: true },
-      });
-      expect(result).toEqual([
-        {
-          id: 'user-1',
-          firstName: 'A',
-          lastName: 'B',
-          since: lastClockIn,
-          source: 'qr_scan_own_phone',
-          geoLat: null,
-          geoLng: null,
-          distanceFromSiteMeters: null,
-        },
-      ]);
+      expect(result.status).toBe('on_break');
+      expect(result.breakSince).toEqual(at('2026-09-01T12:30:00.000Z'));
+      expect(result.entries).toHaveLength(4);
+    });
+
+    it('keeps the previous-day arrival of a session still open at local midnight (night shift)', async () => {
+      prisma.site.findFirst.mockResolvedValue(brusselsSite);
+      prisma.timeEntry.findMany
+        .mockResolvedValueOnce([
+          clock('user-1', 'clock_in', '2026-08-31T20:00:00.000Z'),
+          clock('user-1', 'clock_out', '2026-09-01T04:00:00.000Z'),
+        ])
+        .mockResolvedValueOnce([
+          { userId: 'user-1', type: 'clock_in', timestamp: at('2026-08-31T20:00:00.000Z'), source: 'badge_scan' },
+          { userId: 'user-1', type: 'clock_out', timestamp: at('2026-09-01T04:00:00.000Z'), source: 'badge_scan' },
+        ]);
+      prisma.user.findMany.mockResolvedValue([{ id: 'user-1', firstName: 'A', lastName: 'B' }]);
+
+      const [result] = await service.getPresence('company-a', 'site-a', now);
+
+      expect(prisma.timeEntry.findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({ where: { siteId: 'site-a', timestamp: { gte: at('2026-08-31T20:00:00.000Z') } } }),
+      );
+      expect(result.status).toBe('left');
+      expect(result.entries.map((e) => e.type)).toEqual(['clock_in', 'clock_out']);
     });
 
     it('computes the distance from the site for a gps clock-in when both coordinates are known', async () => {

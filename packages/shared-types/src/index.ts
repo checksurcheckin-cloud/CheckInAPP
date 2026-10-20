@@ -174,11 +174,27 @@ export interface GeocodeCandidate {
 
 // ---- GET /sites/:id/presence (managers/admins uniquement) ----
 
+// 'left' = a pointé aujourd'hui mais est reparti (dernier pointage clock_out).
+export type PresenceStatus = 'present' | 'on_break' | 'left';
+
+export interface PresenceTimeEntry {
+  type: TimeEntryType;
+  timestamp: string;
+  source: TimeEntrySource;
+}
+
 export interface PresentEmployee {
   id: string;
   firstName: string;
   lastName: string;
+  status: PresenceStatus;
+  // Dernier clock_in (début de la session en cours, ou de la dernière).
   since: string;
+  // Début de la pause en cours, null si status !== 'on_break'.
+  breakSince: string | null;
+  // Pointages de la journée (jour civil du site), ordre chronologique — inclut
+  // l'arrivée de la veille si la session était encore ouverte à minuit.
+  entries: PresenceTimeEntry[];
   source: TimeEntrySource;
   geoLat: number | null;
   geoLng: number | null;

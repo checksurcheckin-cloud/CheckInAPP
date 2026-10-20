@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { Prisma, TimeEntrySource, TimeEntryType } from '@prisma/client';
+import { TimeEntrySource, TimeEntryType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { RotatingQrService } from '../users/rotating-qr.service';
@@ -204,69 +204,101 @@ export class TimeEntriesService {
     return updated;
   }
 
-  async getPresence(companyId: string, siteId: string) {
+  // Présents en ce moment + tous ceux qui ont pointé aujourd'hui (jour civil
+  // dans le fuseau du site, comme ensureAvailable — voir CLAUDE.md #21), même
+  // déjà repartis. Chacun avec ses pointages de la journée (arrivée, pauses,
+  // départ) pour le détail côté manager.
+  async getPresence(companyId: string, siteId: string, now: Date = new Date()) {
     const site = await this.prisma.site.findFirst({ where: { id: siteId, companyId } });
     if (!site) {
       throw new NotFoundException('Site introuvable');
     }
+    const dayStart = startOfZonedDay(now, site.timezone ?? 'Europe/Brussels');
 
-    const entries = await this.prisma.timeEntry.findMany({
+    const clockEntries = await this.prisma.timeEntry.findMany({
       where: { siteId, type: { in: PRESENCE_TYPES } },
       orderBy: { timestamp: 'asc' },
       select: { userId: true, type: true, timestamp: true, source: true, geoLat: true, geoLng: true },
     });
 
-    // On garde le dernier pointage de chaque employé — s'il s'agit d'un
-    // clock_in, l'employé est présent depuis ce timestamp précis (sert à
-    // afficher "depuis 09:00" et le mode de pointage côté client sans
-    // recalcul serveur).
-    type LastEntry = {
-      type: TimeEntryType;
-      since: Date;
-      source: TimeEntrySource;
-      geoLat: Prisma.Decimal | null;
-      geoLng: Prisma.Decimal | null;
-    };
-    const lastEntryByUser = new Map<string, LastEntry>();
-    for (const entry of entries) {
-      lastEntryByUser.set(entry.userId, {
-        type: entry.type,
-        since: entry.timestamp,
-        source: entry.source,
-        geoLat: entry.geoLat,
-        geoLng: entry.geoLng,
-      });
+    // Par employé : dernier clock_in/clock_out (présent si c'est un clock_in),
+    // dernier clock_in (mode de pointage + chrono "depuis"), et début de la
+    // fenêtre de pointages à montrer — minuit local, ou plus tôt si une
+    // session était déjà ouverte à minuit (shift de nuit), pour ne pas perdre
+    // l'heure d'arrivée de la veille.
+    type ClockEntry = (typeof clockEntries)[number];
+    const lastClockByUser = new Map<string, ClockEntry>();
+    const lastClockInByUser = new Map<string, ClockEntry>();
+    const windowStartByUser = new Map<string, Date>();
+    for (const entry of clockEntries) {
+      if (entry.timestamp < dayStart) {
+        windowStartByUser.set(entry.userId, entry.type === 'clock_in' ? entry.timestamp : dayStart);
+      }
+      lastClockByUser.set(entry.userId, entry);
+      if (entry.type === 'clock_in') lastClockInByUser.set(entry.userId, entry);
+    }
+    const windowStartFor = (userId: string) => windowStartByUser.get(userId) ?? dayStart;
+
+    const queryStart = new Date(
+      Math.min(dayStart.getTime(), ...[...windowStartByUser.values()].map((d) => d.getTime())),
+    );
+    const recentEntries = await this.prisma.timeEntry.findMany({
+      where: { siteId, timestamp: { gte: queryStart } },
+      orderBy: { timestamp: 'asc' },
+      select: { userId: true, type: true, timestamp: true, source: true },
+    });
+
+    const entriesByUser = new Map<string, { type: TimeEntryType; timestamp: Date; source: TimeEntrySource }[]>();
+    for (const { userId, ...entry } of recentEntries) {
+      if (entry.timestamp < windowStartFor(userId)) continue;
+      entriesByUser.set(userId, [...(entriesByUser.get(userId) ?? []), entry]);
+    }
+    for (const [userId, last] of lastClockByUser) {
+      if (last.type === 'clock_in' && !entriesByUser.has(userId)) entriesByUser.set(userId, []);
     }
 
-    const present = [...lastEntryByUser.entries()].filter(([, e]) => e.type === 'clock_in');
-    if (present.length === 0) {
+    if (entriesByUser.size === 0) {
       return [];
     }
 
     const users = await this.prisma.user.findMany({
-      where: { id: { in: present.map(([userId]) => userId) } },
+      where: { id: { in: [...entriesByUser.keys()] } },
       select: { id: true, firstName: true, lastName: true },
     });
-    const entryByUser = new Map(present);
     const siteLat = site.geoLat != null ? Number(site.geoLat) : null;
     const siteLng = site.geoLng != null ? Number(site.geoLng) : null;
 
     return users.map((u) => {
-      const entry = entryByUser.get(u.id)!;
-      const geoLat = entry.geoLat != null ? Number(entry.geoLat) : null;
-      const geoLng = entry.geoLng != null ? Number(entry.geoLng) : null;
+      const entries = entriesByUser.get(u.id)!;
+      const clockIn = lastClockInByUser.get(u.id);
+      const isPresent = lastClockByUser.get(u.id)?.type === 'clock_in';
+      const since = clockIn?.timestamp ?? entries[0].timestamp;
+
+      // En pause = la dernière pause ouverte depuis l'arrivée n'a pas de fin.
+      const lastBreak = [...entries]
+        .reverse()
+        .find((e) => e.timestamp >= since && (e.type === 'break_start' || e.type === 'break_end'));
+      const onBreak = isPresent && lastBreak?.type === 'break_start';
+      const status: PresenceStatus = !isPresent ? 'left' : onBreak ? 'on_break' : 'present';
+
+      const source = clockIn?.source ?? entries[0].source;
+      const geoLat = clockIn?.geoLat != null ? Number(clockIn.geoLat) : null;
+      const geoLng = clockIn?.geoLng != null ? Number(clockIn.geoLng) : null;
       const distanceFromSiteMeters =
-        entry.source === 'gps' && geoLat !== null && geoLng !== null && siteLat !== null && siteLng !== null
+        source === 'gps' && geoLat !== null && geoLng !== null && siteLat !== null && siteLng !== null
           ? haversineDistanceMeters(geoLat, geoLng, siteLat, siteLng)
           : null;
 
       return {
         ...u,
-        since: entry.since,
-        source: entry.source,
+        status,
+        since,
+        breakSince: onBreak ? lastBreak!.timestamp : null,
+        source,
         geoLat,
         geoLng,
         distanceFromSiteMeters,
+        entries,
       };
     });
   }
@@ -311,6 +343,33 @@ export class TimeEntriesService {
       throw new ForbiddenException("Le pointage GPS n'est pas autorisé pour cet utilisateur");
     }
   }
+}
+
+type PresenceStatus = 'present' | 'on_break' | 'left';
+
+// Minuit (heure locale du site) du jour civil contenant `instant`, en UTC.
+// Le décalage est celui de l'instant lui-même — faux d'une heure seulement
+// si un changement d'heure tombait entre minuit et maintenant, ce qui n'arrive
+// pas en Europe (bascule à 2h/3h du matin, avant toute ouverture de site).
+function startOfZonedDay(instant: Date, timeZone: string): Date {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  })
+    .formatToParts(instant)
+    .reduce<Record<string, number>>((acc, p) => {
+      if (p.type !== 'literal') acc[p.type] = Number(p.value);
+      return acc;
+    }, {});
+  const wallClockAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  const offsetMs = wallClockAsUtc - Math.floor(instant.getTime() / 1000) * 1000;
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day) - offsetMs);
 }
 
 // Distance à vol d'oiseau (formule de Haversine), en mètres — sert au

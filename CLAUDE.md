@@ -788,14 +788,18 @@ reste "à faire".
 - Seed de démo réaliste : 6 semaines d'activité sur 8 employés
 - `packages/shared-types` et `packages/api-client` à jour avec toutes les
   routes ci-dessus (évite la duplication de logique d'appel entre les 3 apps)
-- Déploiement configuré sur Railway (migrations Prisma auto-appliquées au
-  déploiement). **Dans la commande de démarrage** (`railway.json` →
-  `startCommand` : `prisma migrate deploy && node dist/main`), pas dans un
-  `preDeployCommand` : Railway ignorait silencieusement ce dernier, une
-  migration n'a jamais été appliquée et toute lecture de `users` plantait
-  en 500 (colonne `pin_code_encrypted` manquante). `prisma` est donc une
-  dépendance de production du backend, et `healthcheckPath: /api-docs`
-  garde l'ancienne version en ligne si la nouvelle ne démarre pas.
+- Déploiement configuré sur Railway. **Les migrations Prisma sont appliquées
+  par le backend lui-même au démarrage** (`main.ts` →
+  `applyMigrationsOnRailway`, `prisma migrate deploy` avant d'ouvrir le
+  serveur, seulement quand les variables `RAILWAY_*` sont présentes).
+  Raison : Railway **ignore `railway.json`** pour ce service (« Config as
+  Code » abandonné, plus activable pour un service qui ne l'utilisait pas) —
+  son `preDeployCommand` n'a jamais tourné, une migration n'a jamais été
+  appliquée et toute lecture de `users` plantait en 500 (colonne
+  `pin_code_encrypted` manquante). La vraie config (build, start, health
+  check) est celle saisie dans l'interface Railway ; `railway.json` a été
+  supprimé du repo pour ne pas laisser croire qu'elle est versionnée. `prisma` est une dépendance de production du backend
+  pour que la CLI soit présente à l'exécution.
 
 **Connu manquant / dette identifiée** :
 1. Pas de révocation de session côté backend (voir logout ci-dessus) — à

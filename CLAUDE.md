@@ -789,7 +789,13 @@ reste "à faire".
 - `packages/shared-types` et `packages/api-client` à jour avec toutes les
   routes ci-dessus (évite la duplication de logique d'appel entre les 3 apps)
 - Déploiement configuré sur Railway (migrations Prisma auto-appliquées au
-  déploiement)
+  déploiement). **Dans la commande de démarrage** (`railway.json` →
+  `startCommand` : `prisma migrate deploy && node dist/main`), pas dans un
+  `preDeployCommand` : Railway ignorait silencieusement ce dernier, une
+  migration n'a jamais été appliquée et toute lecture de `users` plantait
+  en 500 (colonne `pin_code_encrypted` manquante). `prisma` est donc une
+  dépendance de production du backend, et `healthcheckPath: /api-docs`
+  garde l'ancienne version en ligne si la nouvelle ne démarre pas.
 
 **Connu manquant / dette identifiée** :
 1. Pas de révocation de session côté backend (voir logout ci-dessus) — à

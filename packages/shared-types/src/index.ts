@@ -104,23 +104,34 @@ export interface ShiftOfferCandidate {
   createdAt: string;
 }
 
-// ---- GET /shift-offers : Marché de shifts (offres ouvertes de toute
-// l'entreprise, sauf celles de l'appelant) ----
+// ---- GET /shift-offers : Marché de shifts ----
+// Deux sortes d'entrées :
+// - 'swap' : un collègue cède son shift assigné (ShiftOffer) ;
+// - 'open_shift' : un shift publié resté sans titulaire (ligne « Shifts
+//   disponibles » du planning), du magasin de l'appelant.
+// Les deux se candidatent et se valident de la même façon côté écran ; le
+// client API choisit la bonne route selon `kind` (applyToMarketEntry, etc.).
+export type MarketEntryKind = 'swap' | 'open_shift';
+
 export interface OpenShiftOffer {
-  id: string; // id de l'offre — à passer à applyToShiftOffer
+  kind: MarketEntryKind;
+  id: string; // 'swap' : id de l'offre ; 'open_shift' : id du shift
   shiftId: string;
   shift: Shift;
-  offeredBy: string; // id de l'employé qui a proposé le shift
-  createdAt: string;
-  hasApplied: boolean; // l'appelant a déjà candidaté sur cette offre
+  offeredBy: string | null; // employé qui cède le shift — null pour 'open_shift'
+  createdAt: string | null; // date de l'offre — null pour 'open_shift'
+  hasApplied: boolean; // l'appelant a déjà candidaté sur cette entrée
 }
 
 // ---- GET /shift-offers/pending : page "Échanges à valider" (web-manager) ----
+// 'swap' : toutes les offres ouvertes, même sans candidat ; 'open_shift' :
+// seulement les créneaux libres qui ont au moins un candidat.
 export interface PendingShiftOffer {
+  kind: MarketEntryKind;
   id: string;
   shiftId: string;
   shift: Shift;
-  offeredBy: string;
+  offeredBy: string | null;
   createdAt: string;
   candidates: ShiftOfferCandidate[];
 }

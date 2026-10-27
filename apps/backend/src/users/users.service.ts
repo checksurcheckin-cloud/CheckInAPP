@@ -211,6 +211,11 @@ export class UsersService implements OnApplicationBootstrap {
         },
         data: { status: 'cancelled' },
       });
+      // Ses candidatures en cours sur des créneaux libres à venir (marché)
+      // visaient son ancien magasin — elles n'ont plus lieu d'être.
+      await this.prisma.shiftApplication.deleteMany({
+        where: { userId: id, shift: { startsAt: { gt: new Date() } } },
+      });
       this.realtime.emitToCompany(companyId, 'shifts:changed');
     }
 

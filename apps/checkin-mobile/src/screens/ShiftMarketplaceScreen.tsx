@@ -3,13 +3,15 @@ import { View, Text, ScrollView, Pressable, StyleSheet, RefreshControl, Activity
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography } from '@horaires/ui-tokens';
-import type { Shift, ShiftAssignment, Site, User } from '@horaires/shared-types';
+import type { OpenShiftOffer, Shift, ShiftAssignment, Site, User } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
 import { ConfirmationBanner } from '../components/ConfirmationBanner';
 import { fonts } from '../theme';
 
 type OwnAssignment = { kind: 'own'; id: string; shift: Shift; assignment: ShiftAssignment };
-type OpenOffer = { kind: 'offer'; id: string; shift: Shift; offeredBy: string; hasApplied: boolean };
+// `entry.kind` : 'swap' (un collègue cède son shift) ou 'open_shift' (créneau
+// libre publié par le manager pour le magasin, sans titulaire).
+type OpenOffer = { kind: 'offer'; id: string; shift: Shift; hasApplied: boolean; entry: OpenShiftOffer };
 type Row = OwnAssignment | OpenOffer;
 type Segment = 'available' | 'mine';
 
@@ -22,12 +24,13 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-// Marché de shifts : un employé propose un shift qui lui est assigné ;
-// plusieurs collègues peuvent candidater sur la même offre ; le manager
-// choisit ensuite lequel approuver (page Échanges à valider, web-manager).
-// Tant que ce choix n'est pas fait, le shift reste dans le planning de son
-// propriétaire d'origine (voir CLAUDE.md) — candidater ici ne le lui retire
-// pas. Pas de création d'horaires ici — uniquement le cycle offer/candidater.
+// Marché de shifts : on y trouve les shifts qu'un collègue propose de céder
+// ET les créneaux libres publiés par le manager pour le magasin (ligne
+// « Shifts disponibles » du planning). Dans les deux cas, plusieurs employés
+// peuvent candidater ; le manager choisit ensuite (page Échanges à valider).
+// Tant que ce choix n'est pas fait, rien n'est attribué — candidater ici ne
+// retire pas un shift d'échange à son propriétaire d'origine (voir CLAUDE.md).
+// Pas de création d'horaires ici — uniquement le cycle offer/candidater.
 export function ShiftMarketplaceScreen() {
   const { user, socket } = useAuth();
   const [segment, setSegment] = useState<Segment>('available');
@@ -61,11 +64,9 @@ export function ShiftMarketplaceScreen() {
     }
     setOwnAssignments(mine);
 
-    // "Disponibles" : offres ouvertes des collègues, via l'endpoint dédié
-    // (l'API exclut déjà les miennes).
-    setOpenOffers(
-      offers.map((o) => ({ kind: 'offer', id: o.id, shift: o.shift, offeredBy: o.offeredBy, hasApplied: o.hasApplied })),
-    );
+    // "Disponibles" : offres ouvertes des collègues et créneaux libres du
+    // magasin, via l'endpoint dédié (l'API exclut déjà mes propres offres).
+    setOpenOffers(offers.map((o) => ({ kind: 'offer', id: o.id, shift: o.shift, hasApplied: o.hasApplied, entry: o })));
   }, [user?.id]);
 
   useFocusEffect(
@@ -106,15 +107,16 @@ export function ShiftMarketplaceScreen() {
 
   // "Candidater", pas "Accepter" : ça n'attribue rien tout de suite, ça
   // ajoute juste l'employé à la liste que le manager arbitrera.
-  const applyToOffer = async (offerId: string) => {
-    setBusyId(offerId);
+  const applyToOffer = async (entry: OpenShiftOffer) => {
+    setBusyId(entry.id);
     setBanner(null);
     try {
-      await apiClient.applyToShiftOffer(offerId);
+      await apiClient.applyToMarketEntry(entry);
       await load();
     } catch (err) {
-      // 400 si déjà candidat, 409 si un shift chevauche déjà ce créneau —
-      // dans les deux cas, l'utilisateur doit voir pourquoi ça n'a pas marché.
+      // 400 si déjà candidat, 409 si un shift chevauche déjà ce créneau ou
+      // si l'employé s'est déclaré indisponible — dans tous les cas,
+      // l'utilisateur doit voir pourquoi ça n'a pas marché.
       setBanner({ kind: 'error', message: err instanceof Error ? err.message : 'Échec de la candidature' });
     } finally {
       setBusyId(null);
@@ -148,19 +150,26 @@ export function ShiftMarketplaceScreen() {
           <Text style={styles.cardSiteText}>{siteName(row.shift.siteId)}</Text>
         </View>
 
-        {row.kind === 'offer' ? (
+        {row.kind === 'offer' && row.entry.offeredBy ? (
           <View style={styles.byRow}>
             <View style={styles.miniAvatar}>
-              <Text style={styles.miniAvatarText}>{initials(userName(row.offeredBy))}</Text>
+              <Text style={styles.miniAvatarText}>{initials(userName(row.entry.offeredBy))}</Text>
             </View>
-            <Text style={styles.byName}>Proposé par {userName(row.offeredBy)}</Text>
+            <Text style={styles.byName}>Proposé par {userName(row.entry.offeredBy)}</Text>
+          </View>
+        ) : row.kind === 'offer' ? (
+          <View style={styles.byRow}>
+            <View style={[styles.miniAvatar, styles.openSlotIcon]}>
+              <Ionicons name="storefront-outline" size={12} color={colors.accent} />
+            </View>
+            <Text style={styles.byName}>Créneau libre du magasin</Text>
           </View>
         ) : null}
 
         <Pressable
           style={[styles.acceptBtn, alreadyApplied && styles.acceptBtnDone]}
           disabled={busy || alreadyApplied}
-          onPress={() => (row.kind === 'own' ? offerShift(row.assignment.id) : applyToOffer(row.id))}
+          onPress={() => (row.kind === 'own' ? offerShift(row.assignment.id) : applyToOffer(row.entry))}
         >
           {busy ? (
             <ActivityIndicator color={colors.surface} size="small" />
@@ -185,7 +194,7 @@ export function ShiftMarketplaceScreen() {
             </Text>
           </View>
         </View>
-        <Text style={styles.subtitle}>Proposés par vos collègues</Text>
+        <Text style={styles.subtitle}>Créneaux libres et shifts proposés par vos collègues</Text>
 
         {banner ? <ConfirmationBanner kind={banner.kind} message={banner.message} /> : null}
 
@@ -200,12 +209,12 @@ export function ShiftMarketplaceScreen() {
       </View>
 
       <Text style={[styles.sectionLabel, styles.px]}>
-        {segment === 'available' ? 'Offres disponibles' : 'Vos shifts à proposer'}
+        {segment === 'available' ? 'Shifts disponibles' : 'Vos shifts à proposer'}
       </Text>
 
       {rows.length === 0 ? (
         <Text style={[styles.empty, styles.px]}>
-          {segment === 'available' ? 'Aucune offre ouverte actuellement.' : "Rien à proposer pour l'instant."}
+          {segment === 'available' ? 'Aucun shift disponible actuellement.' : "Rien à proposer pour l'instant."}
         </Text>
       ) : (
         <ScrollView
@@ -278,6 +287,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   miniAvatarText: { fontFamily: fonts.displaySemiBold, fontSize: 10, color: colors.primary },
+  openSlotIcon: { backgroundColor: colors.accentTint },
   byName: { fontSize: 12, color: colors.textSecondary },
 
   acceptBtn: {

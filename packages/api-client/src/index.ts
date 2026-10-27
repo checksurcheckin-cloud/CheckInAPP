@@ -362,6 +362,28 @@ export class ApiClient {
     return this.request<ShiftAssignment>('POST', `/shift-offers/${offerId}/reject`);
   }
 
+  // Marché de shifts, toutes entrées confondues : un échange ('swap') passe
+  // par /shift-offers/:id, un créneau libre ('open_shift') par /shifts/:id.
+  applyToMarketEntry(entry: Pick<OpenShiftOffer, 'kind' | 'id'>) {
+    return entry.kind === 'swap'
+      ? this.applyToShiftOffer(entry.id)
+      : this.request<ShiftOfferCandidate>('POST', `/shifts/${entry.id}/apply`);
+  }
+
+  approveMarketEntry(entry: Pick<PendingShiftOffer, 'kind' | 'id'>, userId: string) {
+    return entry.kind === 'swap'
+      ? this.approveShiftOffer(entry.id, userId)
+      : this.request<ShiftAssignment>('POST', `/shifts/${entry.id}/applications/approve`, { userId });
+  }
+
+  // 'swap' : retire l'offre du marché (le shift revient à son propriétaire) ;
+  // 'open_shift' : refuse les candidatures, le créneau reste sur le marché.
+  rejectMarketEntry(entry: Pick<PendingShiftOffer, 'kind' | 'id'>) {
+    return entry.kind === 'swap'
+      ? this.rejectShiftOffer(entry.id)
+      : this.request<void>('POST', `/shifts/${entry.id}/applications/reject`);
+  }
+
   // ---- Disponibilités ----
   getAvailabilities(userId?: string) {
     return this.request<Availability[]>('GET', `/availabilities${toQueryString({ userId })}`);

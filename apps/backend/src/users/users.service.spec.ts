@@ -26,6 +26,9 @@ describe('UsersService', () => {
     shiftAssignment: {
       updateMany: jest.Mock;
     };
+    shiftApplication: {
+      deleteMany: jest.Mock;
+    };
   };
 
   beforeEach(async () => {
@@ -43,6 +46,9 @@ describe('UsersService', () => {
       },
       shiftAssignment: {
         updateMany: jest.fn(),
+      },
+      shiftApplication: {
+        deleteMany: jest.fn(),
       },
     };
     realtime = { emitToCompany: jest.fn() };
@@ -200,6 +206,9 @@ describe('UsersService', () => {
         shift: { startsAt: { gt: expect.any(Date) } },
       },
       data: { status: 'cancelled' },
+    });
+    expect(prisma.shiftApplication.deleteMany).toHaveBeenCalledWith({
+      where: { userId: expect.any(String), shift: { startsAt: { gt: expect.any(Date) } } },
     });
     expect(realtime.emitToCompany).toHaveBeenCalledWith('company-a', 'shifts:changed');
   });

@@ -4,6 +4,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius } from '@horaires/ui-tokens';
 import type { PendingShiftOffer, Site, User } from '@horaires/shared-types';
+
+type Entry = PendingShiftOffer;
 import { apiClient, useAuth } from '../services/AuthService';
 import { fonts } from '../theme';
 
@@ -16,11 +18,14 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-// Toutes les offres encore ouvertes du marché de shifts — y compris celles
-// sans aucun candidat, pour que le manager voie ce qui reste sans preneur.
-// Plusieurs collègues peuvent candidater sur la même offre : on choisit
-// lequel approuver (chips tapables, un seul sélectionné à la fois). Un refus
-// remet l'assignation à son propriétaire d'origine (ShiftsService.rejectOffer).
+// Toutes les offres d'échange encore ouvertes du marché de shifts — y compris
+// celles sans aucun candidat, pour que le manager voie ce qui reste sans
+// preneur — plus les créneaux libres du planning qui ont reçu au moins une
+// candidature. Plusieurs employés peuvent candidater sur la même entrée : on
+// choisit lequel approuver (chips tapables, un seul sélectionné à la fois).
+// Un refus remet un échange à son propriétaire d'origine
+// (ShiftsService.rejectOffer) ; sur un créneau libre, il efface seulement les
+// candidatures, le créneau reste sur le marché.
 export function ShiftApprovalScreen() {
   const { user, socket } = useAuth();
   const [offers, setOffers] = useState<PendingShiftOffer[]>([]);
@@ -71,22 +76,22 @@ export function ShiftApprovalScreen() {
     setIsRefreshing(false);
   };
 
-  const approve = async (offerId: string) => {
-    const candidateId = selectedCandidate[offerId];
+  const approve = async (entry: Entry) => {
+    const candidateId = selectedCandidate[entry.id];
     if (!candidateId) return;
-    setBusyId(offerId);
+    setBusyId(entry.id);
     try {
-      await apiClient.approveShiftOffer(offerId, candidateId);
+      await apiClient.approveMarketEntry(entry, candidateId);
       await load();
     } finally {
       setBusyId(null);
     }
   };
 
-  const reject = async (offerId: string) => {
-    setBusyId(offerId);
+  const reject = async (entry: Entry) => {
+    setBusyId(entry.id);
     try {
-      await apiClient.rejectShiftOffer(offerId);
+      await apiClient.rejectMarketEntry(entry);
       await load();
     } finally {
       setBusyId(null);
@@ -116,7 +121,7 @@ export function ShiftApprovalScreen() {
           </Text>
         </View>
       </View>
-      <Text style={styles.subtitle}>Offres du marché de shifts</Text>
+      <Text style={styles.subtitle}>Échanges et créneaux libres du marché de shifts</Text>
 
       <FlatList
         data={offers}
@@ -125,17 +130,28 @@ export function ShiftApprovalScreen() {
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refresh} />}
         ListEmptyComponent={<Text style={styles.empty}>Aucune offre ouverte sur le marché de shifts.</Text>}
         renderItem={({ item }) => {
-          const fromName = userName(item.offeredBy);
+          const isOpenSlot = item.kind === 'open_shift';
+          const fromName = item.offeredBy ? userName(item.offeredBy) : 'Créneau libre';
           const busy = busyId === item.id;
           const hasCandidates = item.candidates.length > 0;
           return (
             <View style={styles.card}>
               <View style={styles.swapRow}>
                 <View style={styles.swapAvatar}>
-                  <Text style={styles.swapAvatarText}>{initials(fromName)}</Text>
+                  {isOpenSlot ? (
+                    <Ionicons name="storefront-outline" size={14} color={colors.primary} />
+                  ) : (
+                    <Text style={styles.swapAvatarText}>{initials(fromName)}</Text>
+                  )}
                 </View>
                 <Text style={styles.swapNames} numberOfLines={1}>
-                  <Text style={styles.swapNamesBold}>{fromName}</Text> propose ce shift
+                  {isOpenSlot ? (
+                    <Text style={styles.swapNamesBold}>Créneau libre du magasin</Text>
+                  ) : (
+                    <>
+                      <Text style={styles.swapNamesBold}>{fromName}</Text> propose ce shift
+                    </>
+                  )}
                 </Text>
               </View>
 
@@ -178,14 +194,14 @@ export function ShiftApprovalScreen() {
               )}
 
               <View style={styles.actionsRow}>
-                <Pressable style={styles.rejectBtn} disabled={busy} onPress={() => reject(item.id)}>
+                <Pressable style={styles.rejectBtn} disabled={busy} onPress={() => reject(item)}>
                   <Ionicons name="close" size={16} color={colors.textPrimary} />
-                  <Text style={styles.rejectBtnText}>Retirer</Text>
+                  <Text style={styles.rejectBtnText}>{isOpenSlot ? 'Refuser' : 'Retirer'}</Text>
                 </Pressable>
                 <Pressable
                   style={[styles.approveBtn, !hasCandidates && styles.approveBtnDisabled]}
                   disabled={busy || !hasCandidates}
-                  onPress={() => approve(item.id)}
+                  onPress={() => approve(item)}
                 >
                   {busy ? (
                     <ActivityIndicator color={colors.surface} size="small" />

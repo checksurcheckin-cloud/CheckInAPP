@@ -6,10 +6,11 @@ import { ApiError } from '@horaires/api-client';
 import { apiClient, useAuth } from '../services/AuthService';
 import { Dialog } from '../components/Dialog';
 
-// Page "Échanges à valider" : toutes les offres encore ouvertes du marché de
-// shifts, candidatures comprises — y compris celles sans aucun candidat, pour
-// que le manager voie ce qui reste sans preneur, pas seulement ce qui est
-// prêt à valider. Plusieurs collègues peuvent candidater sur la même offre ;
+// Page "Échanges à valider" : toutes les offres d'échange encore ouvertes du
+// marché de shifts, candidatures comprises — y compris celles sans aucun
+// candidat, pour que le manager voie ce qui reste sans preneur — plus les
+// créneaux libres du planning (publiés sans titulaire) qui ont reçu au moins
+// une candidature. Plusieurs employés peuvent candidater sur la même entrée ;
 // le manager choisit lequel approuver dans le menu déroulant.
 export function ShiftApprovalPage() {
   const { socket } = useAuth();
@@ -59,27 +60,28 @@ export function ShiftApprovalPage() {
     };
   }, [socket, load]);
 
-  const approve = async (offerId: string) => {
-    const userId = selectedCandidate[offerId];
+  const approve = async (offer: PendingShiftOffer) => {
+    const userId = selectedCandidate[offer.id];
     if (!userId) return;
-    setBusyId(offerId);
+    setBusyId(offer.id);
     try {
-      await apiClient.approveShiftOffer(offerId, userId);
+      await apiClient.approveMarketEntry(offer, userId);
       await load();
     } catch (err) {
       // Le backend refuse (409) si le candidat choisi a depuis récupéré un
-      // shift qui chevauche celui-ci dans le temps — sans ce catch, l'erreur
-      // passait inaperçue et le bouton semblait ne rien faire pour la ligne.
+      // shift qui chevauche celui-ci dans le temps, ou s'est déclaré
+      // indisponible — sans ce catch, l'erreur passait inaperçue et le
+      // bouton semblait ne rien faire pour la ligne.
       setErrorMessage(err instanceof ApiError ? err.message : "Impossible de valider cet échange");
     } finally {
       setBusyId(null);
     }
   };
 
-  const reject = async (offerId: string) => {
-    setBusyId(offerId);
+  const reject = async (offer: PendingShiftOffer) => {
+    setBusyId(offer.id);
     try {
-      await apiClient.rejectShiftOffer(offerId);
+      await apiClient.rejectMarketEntry(offer);
       await load();
     } catch (err) {
       setErrorMessage(err instanceof ApiError ? err.message : "Impossible de retirer cette offre");
@@ -101,7 +103,7 @@ export function ShiftApprovalPage() {
       {isLoading ? (
         <p style={styles.muted}>Chargement…</p>
       ) : offers.length === 0 ? (
-        <p style={styles.muted}>Aucune offre ouverte sur le marché de shifts actuellement.</p>
+        <p style={styles.muted}>Aucun échange ni candidature à valider sur le marché de shifts actuellement.</p>
       ) : (
         <div style={styles.tableWrap}>
         <table className="data-table" style={styles.table}>
@@ -129,7 +131,9 @@ export function ShiftApprovalPage() {
                       minute: '2-digit',
                     })}
                   </td>
-                  <td style={styles.td}>{userName(offer.offeredBy)}</td>
+                  <td style={styles.td}>
+                    {offer.offeredBy ? userName(offer.offeredBy) : <span style={styles.openSlot}>Créneau libre</span>}
+                  </td>
                   <td style={styles.td}>
                     {hasCandidates ? (
                       <select
@@ -153,7 +157,7 @@ export function ShiftApprovalPage() {
                         className="btn"
                         style={styles.approveButton}
                         disabled={busy || !hasCandidates}
-                        onClick={() => approve(offer.id)}
+                        onClick={() => approve(offer)}
                         title={hasCandidates ? undefined : 'Aucun candidat à valider'}
                       >
                         <Check size={14} strokeWidth={2.5} />
@@ -163,11 +167,15 @@ export function ShiftApprovalPage() {
                         className="btn"
                         style={styles.rejectButton}
                         disabled={busy}
-                        onClick={() => reject(offer.id)}
-                        title="Retirer cette offre du marché"
+                        onClick={() => reject(offer)}
+                        title={
+                          offer.kind === 'swap'
+                            ? 'Retirer cette offre du marché'
+                            : 'Refuser les candidatures (le créneau reste sur le marché)'
+                        }
                       >
                         <X size={14} strokeWidth={2.5} />
-                        Retirer
+                        {offer.kind === 'swap' ? 'Retirer' : 'Refuser'}
                       </button>
                     </div>
                   </td>
@@ -219,6 +227,14 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: colors.surface,
   },
   noCandidate: { fontSize: typography.sizes.sm, color: colors.textSecondary, fontStyle: 'italic' },
+  openSlot: {
+    fontSize: typography.sizes.sm,
+    fontWeight: 600,
+    color: colors.accent,
+    backgroundColor: colors.accentTint,
+    padding: `2px ${spacing.sm}px`,
+    borderRadius: radius.full,
+  },
   actions: { display: 'flex', gap: spacing.xs },
   approveButton: {
     display: 'flex',

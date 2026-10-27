@@ -724,6 +724,37 @@ Cible : PME de 20-100 employés par site.
       idempotent, jamais bloquant si la clé manque). Changer
       `PIN_ENCRYPTION_KEY` en prod rendrait tous les PIN illisibles.
 
+30. **Les shifts publiés sans titulaire (ligne « Shifts disponibles » du
+    planning) apparaissent dans le marché de shifts des employés du magasin,
+    avec la même mécanique que les échanges (décision #22) : candidatures
+    multiples, le manager choisit.**
+    - `GET /shift-offers` renvoie deux sortes d'entrées, distinguées par
+      `kind` : `'swap'` (ShiftOffer, inchangé) et `'open_shift'` (shift
+      `published`, à venir, sans assignation active — `openShiftWhere` dans
+      `shifts.service.ts`). Pour `'open_shift'`, `id` = id du shift,
+      `offeredBy`/`createdAt` = `null`. Un brouillon n'y apparaît jamais
+      (décision #15) : c'est bien la publication qui le met sur le marché.
+    - Portée « magasin » : un employé rattaché à un site (`User.siteId`) ne
+      voit et ne peut candidater que sur les créneaux libres de ce site
+      (403 sinon) ; sans site, il voit tous les sites (même règle que
+      décision #25). Les offres `'swap'` restent, elles, à l'échelle de
+      l'entreprise comme avant.
+    - Candidatures dans une table dédiée `ShiftApplication` (`shiftId`,
+      `userId`, unique par paire) plutôt que dans `ShiftOffer`, qui exige une
+      assignation existante à céder. `POST /shifts/:id/apply` vérifie tout de
+      suite disponibilité déclarée et chevauchement (retour immédiat) ;
+      `POST /shifts/:id/applications/approve` passe par `assign()`, qui
+      revérifie tout ; `POST /shifts/:id/applications/reject` efface les
+      candidatures mais laisse le créneau sur le marché.
+    - `assign()` efface les candidatures du shift dès qu'il est pourvu, quelle
+      que soit la voie (validation d'un candidat ou glisser-déposer sur le
+      planning) ; `remove()` les supprime avant le shift (contrainte FK) ;
+      changer le site d'un employé efface ses candidatures à venir.
+    - « Échanges à valider » (web + mobile) n'affiche un créneau libre que
+      s'il a au moins un candidat — sans candidat, il est déjà visible sur la
+      ligne « Shifts disponibles ». Le client API choisit la bonne route selon
+      `kind` (`applyToMarketEntry`, `approveMarketEntry`, `rejectMarketEntry`).
+
 ## Stack
 
 - Backend : NestJS + PostgreSQL + Prisma + Passport/JWT

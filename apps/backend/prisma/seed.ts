@@ -218,6 +218,7 @@ async function main() {
   // faisait planter tout reseed d'une base ayant déjà des candidatures.
   await prisma.shiftOfferCandidate.deleteMany({ where: { offerId: { in: oldOffers.map((o) => o.id) } } });
   await prisma.shiftOffer.deleteMany({ where: { shiftAssignmentId: { in: oldAssignmentIds } } });
+  await prisma.shiftApplication.deleteMany({ where: { shiftId: { in: oldShiftIds } } });
   await prisma.shiftAssignment.deleteMany({ where: { shiftId: { in: oldShiftIds } } });
   await prisma.shift.deleteMany({ where: { id: { in: oldShiftIds } } });
   await prisma.availability.deleteMany({ where: { userId: { in: employeeIds } } });

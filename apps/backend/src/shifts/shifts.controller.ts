@@ -77,6 +77,30 @@ export class ShiftsController {
     return this.shiftsService.assign(user.companyId, id, dto);
   }
 
+  // Un employé candidate sur un créneau libre publié de son magasin (entrée
+  // 'open_shift' du marché) — voir ShiftsService.applyToOpenShift.
+  @Post('shifts/:id/apply')
+  applyToOpenShift(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.shiftsService.applyToOpenShift(user.companyId, user, id);
+  }
+
+  // Le manager choisit un candidat (dto.userId) parmi ceux du créneau libre.
+  @Post('shifts/:id/applications/approve')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'manager')
+  approveOpenShift(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ApproveShiftOfferDto) {
+    return this.shiftsService.approveOpenShift(user.companyId, id, dto);
+  }
+
+  // Refuse toutes les candidatures ; le créneau reste libre sur le marché.
+  @Post('shifts/:id/applications/reject')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'manager')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  rejectOpenShiftApplications(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.shiftsService.rejectOpenShiftApplications(user.companyId, id);
+  }
+
   // L'employé assigné propose son propre shift.
   @Post('shift-assignments/:id/offer')
   offerAssignment(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {

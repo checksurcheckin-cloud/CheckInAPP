@@ -31,6 +31,11 @@ describe('ShiftsService', () => {
       findFirst: jest.Mock;
       deleteMany: jest.Mock;
     };
+    shiftApplication: {
+      create: jest.Mock;
+      findFirst: jest.Mock;
+      deleteMany: jest.Mock;
+    };
     $transaction: jest.Mock;
   };
 
@@ -41,7 +46,7 @@ describe('ShiftsService', () => {
       availability: { findFirst: jest.fn() },
       shift: {
         create: jest.fn(),
-        findMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
         findFirst: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
@@ -61,6 +66,11 @@ describe('ShiftsService', () => {
         deleteMany: jest.fn(),
       },
       shiftOfferCandidate: {
+        create: jest.fn(),
+        findFirst: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      shiftApplication: {
         create: jest.fn(),
         findFirst: jest.fn(),
         deleteMany: jest.fn(),
@@ -264,6 +274,7 @@ describe('ShiftsService', () => {
       expect(prisma.shiftOffer.deleteMany).toHaveBeenCalledWith({
         where: { shiftAssignmentId: { in: ['assignment-1', 'assignment-2'] } },
       });
+      expect(prisma.shiftApplication.deleteMany).toHaveBeenCalledWith({ where: { shiftId: 'shift-1' } });
       expect(prisma.shiftAssignment.deleteMany).toHaveBeenCalledWith({ where: { shiftId: 'shift-1' } });
       expect(prisma.shift.delete).toHaveBeenCalledWith({ where: { id: 'shift-1' } });
       expect(realtime.emitToCompany).not.toHaveBeenCalled();
@@ -569,6 +580,9 @@ describe('ShiftsService', () => {
     });
   });
 
+  const SWAP_START = new Date('2026-09-02T08:00:00.000Z');
+  const SWAP_END = new Date('2026-09-02T12:00:00.000Z');
+
   describe('listOpenOffers', () => {
     it("returns other colleagues' open offers in the company, mapped for the marketplace, with hasApplied", async () => {
       prisma.shiftOffer.findMany.mockResolvedValue([
@@ -578,7 +592,7 @@ describe('ShiftsService', () => {
           createdAt: new Date('2026-09-01T10:00:00.000Z'),
           shiftAssignment: {
             shiftId: 'shift-9',
-            shift: { id: 'shift-9', siteId: 'site-1', startsAt: 'x', endsAt: 'y' },
+            shift: { id: 'shift-9', siteId: 'site-1', startsAt: SWAP_START, endsAt: SWAP_END },
           },
           candidates: [{ id: 'candidate-1', offerId: 'offer-1', userId: 'user-1' }],
         },
@@ -600,9 +614,10 @@ describe('ShiftsService', () => {
       });
       expect(result).toEqual([
         {
+          kind: 'swap',
           id: 'offer-1',
           shiftId: 'shift-9',
-          shift: { id: 'shift-9', siteId: 'site-1', startsAt: 'x', endsAt: 'y' },
+          shift: { id: 'shift-9', siteId: 'site-1', startsAt: SWAP_START, endsAt: SWAP_END },
           offeredBy: 'colleague-2',
           createdAt: new Date('2026-09-01T10:00:00.000Z'),
           hasApplied: true,
@@ -620,7 +635,7 @@ describe('ShiftsService', () => {
           createdAt: new Date('2026-09-01T10:00:00.000Z'),
           shiftAssignment: {
             shiftId: 'shift-9',
-            shift: { id: 'shift-9', siteId: 'site-1', startsAt: 'x', endsAt: 'y' },
+            shift: { id: 'shift-9', siteId: 'site-1', startsAt: SWAP_START, endsAt: SWAP_END },
           },
           candidates: [],
         },
@@ -641,9 +656,10 @@ describe('ShiftsService', () => {
       });
       expect(result).toEqual([
         {
+          kind: 'swap',
           id: 'offer-1',
           shiftId: 'shift-9',
-          shift: { id: 'shift-9', siteId: 'site-1', startsAt: 'x', endsAt: 'y' },
+          shift: { id: 'shift-9', siteId: 'site-1', startsAt: SWAP_START, endsAt: SWAP_END },
           offeredBy: 'colleague-1',
           createdAt: new Date('2026-09-01T10:00:00.000Z'),
           candidates: [],
@@ -995,6 +1011,144 @@ describe('ShiftsService', () => {
       await expect(service.rejectOffer('company-a', 'offer-of-company-b')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+  describe('open shifts on the market', () => {
+    const OPEN_START = new Date('2026-09-03T14:00:00.000Z');
+    const OPEN_END = new Date('2026-09-03T18:00:00.000Z');
+    const openShift = { id: 'open-1', siteId: 'site-ixelles', startsAt: OPEN_START, endsAt: OPEN_END, status: 'published' };
+    const employee = { userId: 'user-1', companyId: 'company-a', role: 'employee' };
+
+    it("lists published, future, unassigned shifts of the requester's store as open_shift entries", async () => {
+      prisma.shiftOffer.findMany.mockResolvedValue([]);
+      prisma.user.findFirst.mockResolvedValue({ siteId: 'site-ixelles' });
+      prisma.shift.findMany.mockResolvedValue([{ ...openShift, applications: [{ id: 'app-1' }] }]);
+
+      const result = await service.listOpenOffers('company-a', 'user-1');
+
+      expect(prisma.shift.findMany).toHaveBeenCalledWith({
+        where: {
+          site: { companyId: 'company-a' },
+          status: 'published',
+          startsAt: { gt: expect.any(Date) },
+          assignments: { none: { status: { not: 'cancelled' } } },
+          siteId: 'site-ixelles',
+        },
+        include: { applications: { where: { userId: 'user-1' } } },
+        orderBy: { startsAt: 'asc' },
+      });
+      expect(result).toEqual([
+        { kind: 'open_shift', id: 'open-1', shiftId: 'open-1', shift: openShift, offeredBy: null, createdAt: null, hasApplied: true },
+      ]);
+    });
+
+    it('shows open shifts of every site to an employee without a store', async () => {
+      prisma.shiftOffer.findMany.mockResolvedValue([]);
+      prisma.user.findFirst.mockResolvedValue({ siteId: null });
+
+      await service.listOpenOffers('company-a', 'user-1');
+
+      expect(prisma.shift.findMany.mock.calls[0][0].where).not.toHaveProperty('siteId');
+    });
+
+    it('records an application after checking availability and overlaps', async () => {
+      prisma.shift.findFirst.mockResolvedValue({ ...openShift, site: { timezone: 'Europe/Brussels' } });
+      prisma.user.findFirst.mockResolvedValue({ siteId: 'site-ixelles' });
+      prisma.shiftApplication.findFirst.mockResolvedValue(null);
+      prisma.availability.findFirst.mockResolvedValue(null);
+      prisma.shiftAssignment.findFirst.mockResolvedValue(null);
+      prisma.shiftApplication.create.mockResolvedValue({ id: 'app-1' });
+
+      await service.applyToOpenShift('company-a', employee, 'open-1');
+
+      expect(prisma.shift.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ id: 'open-1', site: { companyId: 'company-a' } }) }),
+      );
+      expect(prisma.shiftApplication.create).toHaveBeenCalledWith({ data: { shiftId: 'open-1', userId: 'user-1' } });
+      expect(realtime.emitToCompany).toHaveBeenCalledWith('company-a', 'shifts:changed');
+    });
+
+    it('refuses an application on a slot that is no longer open (assigned, draft, past or another company)', async () => {
+      prisma.shift.findFirst.mockResolvedValue(null);
+
+      await expect(service.applyToOpenShift('company-a', employee, 'open-1')).rejects.toThrow(NotFoundException);
+      expect(prisma.shiftApplication.create).not.toHaveBeenCalled();
+    });
+
+    it("refuses an application on another store's slot", async () => {
+      prisma.shift.findFirst.mockResolvedValue({ ...openShift, site: { timezone: 'Europe/Brussels' } });
+      prisma.user.findFirst.mockResolvedValue({ siteId: 'site-bruxelles' });
+
+      await expect(service.applyToOpenShift('company-a', employee, 'open-1')).rejects.toThrow(ForbiddenException);
+      expect(prisma.shiftApplication.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a second application by the same employee', async () => {
+      prisma.shift.findFirst.mockResolvedValue({ ...openShift, site: { timezone: 'Europe/Brussels' } });
+      prisma.user.findFirst.mockResolvedValue({ siteId: 'site-ixelles' });
+      prisma.shiftApplication.findFirst.mockResolvedValue({ id: 'app-1' });
+
+      await expect(service.applyToOpenShift('company-a', employee, 'open-1')).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses to approve someone who did not apply', async () => {
+      prisma.shiftApplication.findFirst.mockResolvedValue(null);
+
+      await expect(service.approveOpenShift('company-a', 'open-1', { userId: 'user-2' })).rejects.toThrow(NotFoundException);
+      expect(prisma.shiftApplication.findFirst).toHaveBeenCalledWith({
+        where: { shiftId: 'open-1', userId: 'user-2', shift: { site: { companyId: 'company-a' } } },
+      });
+      expect(prisma.shiftAssignment.create).not.toHaveBeenCalled();
+    });
+
+    it('assigns the chosen applicant and clears every application of the slot', async () => {
+      prisma.shiftApplication.findFirst.mockResolvedValue({ id: 'app-1' });
+      prisma.shift.findFirst.mockResolvedValue({ ...openShift, assignments: [] });
+      prisma.user.findFirst.mockResolvedValue({ id: 'user-1', companyId: 'company-a' });
+      prisma.site.findFirst.mockResolvedValue({ timezone: 'Europe/Brussels' });
+      prisma.availability.findFirst.mockResolvedValue(null);
+      prisma.shiftAssignment.findFirst.mockResolvedValue(null);
+      prisma.shiftAssignment.create.mockResolvedValue({ id: 'assignment-1' });
+
+      await service.approveOpenShift('company-a', 'open-1', { userId: 'user-1' });
+
+      expect(prisma.shiftAssignment.create).toHaveBeenCalledWith({
+        data: { shiftId: 'open-1', userId: 'user-1', status: 'assigned' },
+      });
+      expect(prisma.shiftApplication.deleteMany).toHaveBeenCalledWith({ where: { shiftId: 'open-1' } });
+      expect(realtime.emitToCompany).toHaveBeenCalledWith('company-a', 'shifts:changed');
+    });
+
+    it('lists open shifts with applications for the manager, in the candidate shape', async () => {
+      prisma.shiftOffer.findMany.mockResolvedValue([]);
+      const appliedAt = new Date('2026-09-01T09:00:00.000Z');
+      prisma.shift.findMany.mockResolvedValue([
+        { ...openShift, applications: [{ id: 'app-1', shiftId: 'open-1', userId: 'user-1', createdAt: appliedAt }] },
+      ]);
+
+      const result = await service.listPendingOffersForManager('company-a');
+
+      expect(prisma.shift.findMany.mock.calls[0][0].where).toMatchObject({ applications: { some: {} } });
+      expect(result).toEqual([
+        {
+          kind: 'open_shift',
+          id: 'open-1',
+          shiftId: 'open-1',
+          shift: openShift,
+          offeredBy: null,
+          createdAt: appliedAt,
+          candidates: [{ id: 'app-1', offerId: 'open-1', userId: 'user-1', createdAt: appliedAt }],
+        },
+      ]);
+    });
+
+    it('rejecting clears the applications but leaves the slot open', async () => {
+      prisma.shift.findFirst.mockResolvedValue(openShift);
+
+      await service.rejectOpenShiftApplications('company-a', 'open-1');
+
+      expect(prisma.shiftApplication.deleteMany).toHaveBeenCalledWith({ where: { shiftId: 'open-1' } });
+      expect(prisma.shiftAssignment.create).not.toHaveBeenCalled();
     });
   });
 });

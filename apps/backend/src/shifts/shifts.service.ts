@@ -96,12 +96,17 @@ export class ShiftsService {
     return shift;
   }
 
-  // Marché de shifts : les offres d'échange encore ouvertes de toute
-  // l'entreprise, visibles par n'importe quel employé pour qu'il puisse les
-  // reprendre — sauf les siennes. Séparé de findAll (qui reste strictement
-  // "mes shifts") pour ne pas faire fuiter le planning des collègues dans
-  // l'écran Planning. `hasApplied` évite de re-proposer un bouton "candidater"
-  // actif sur une offre où l'appelant a déjà candidaté.
+  // Marché de shifts : deux sortes d'entrées, distinguées par `kind`.
+  // - 'swap' : offres d'échange encore ouvertes de toute l'entreprise, sauf
+  //   celles de l'appelant (un collègue cède son shift assigné).
+  // - 'open_shift' : shifts publiés restés sans titulaire (ligne « Shifts
+  //   disponibles » du planning), à venir, du magasin de l'appelant — ou de
+  //   tous les sites s'il n'est rattaché à aucun (même règle que
+  //   UsersService.findAll, décision #25).
+  // Séparé de findAll (qui reste strictement "mes shifts") pour ne pas faire
+  // fuiter le planning des collègues dans l'écran Planning. `hasApplied`
+  // évite de re-proposer un bouton "candidater" actif sur une entrée où
+  // l'appelant a déjà candidaté.
   async listOpenOffers(companyId: string, requesterId: string) {
     const offers = await this.prisma.shiftOffer.findMany({
       where: {
@@ -116,14 +121,37 @@ export class ShiftsService {
       orderBy: { createdAt: 'asc' },
     });
 
-    return offers.map((offer) => ({
-      id: offer.id,
-      shiftId: offer.shiftAssignment.shiftId,
-      shift: offer.shiftAssignment.shift,
-      offeredBy: offer.offeredBy,
-      createdAt: offer.createdAt,
-      hasApplied: offer.candidates.length > 0,
-    }));
+    const requester = await this.prisma.user.findFirst({
+      where: { id: requesterId, companyId },
+      select: { siteId: true },
+    });
+    const openShifts = await this.prisma.shift.findMany({
+      where: { ...openShiftWhere(companyId), ...(requester?.siteId ? { siteId: requester.siteId } : {}) },
+      include: { applications: { where: { userId: requesterId } } },
+      orderBy: { startsAt: 'asc' },
+    });
+
+    const entries = [
+      ...offers.map((offer) => ({
+        kind: 'swap' as const,
+        id: offer.id,
+        shiftId: offer.shiftAssignment.shiftId,
+        shift: offer.shiftAssignment.shift,
+        offeredBy: offer.offeredBy as string | null,
+        createdAt: offer.createdAt as Date | null,
+        hasApplied: offer.candidates.length > 0,
+      })),
+      ...openShifts.map(({ applications, ...shift }) => ({
+        kind: 'open_shift' as const,
+        id: shift.id,
+        shiftId: shift.id,
+        shift,
+        offeredBy: null,
+        createdAt: null,
+        hasApplied: applications.length > 0,
+      })),
+    ];
+    return entries.sort((a, b) => a.shift.startsAt.getTime() - b.shift.startsAt.getTime());
   }
 
   // Le pendant côté manager : toutes les offres encore ouvertes de
@@ -144,14 +172,37 @@ export class ShiftsService {
       orderBy: { createdAt: 'asc' },
     });
 
-    return offers.map((offer) => ({
-      id: offer.id,
-      shiftId: offer.shiftAssignment.shiftId,
-      shift: offer.shiftAssignment.shift,
-      offeredBy: offer.offeredBy,
-      createdAt: offer.createdAt,
-      candidates: offer.candidates,
-    }));
+    // Créneaux libres : seulement ceux qui ont au moins un candidat — ceux
+    // sans candidat sont déjà visibles sur la ligne « Shifts disponibles »
+    // du planning, inutile de les répéter ici.
+    const openShifts = await this.prisma.shift.findMany({
+      where: { ...openShiftWhere(companyId), applications: { some: {} } },
+      include: { applications: { orderBy: { createdAt: 'asc' } } },
+      orderBy: { startsAt: 'asc' },
+    });
+
+    return [
+      ...offers.map((offer) => ({
+        kind: 'swap' as const,
+        id: offer.id,
+        shiftId: offer.shiftAssignment.shiftId,
+        shift: offer.shiftAssignment.shift,
+        offeredBy: offer.offeredBy as string | null,
+        createdAt: offer.createdAt,
+        candidates: offer.candidates,
+      })),
+      ...openShifts.map(({ applications, ...shift }) => ({
+        kind: 'open_shift' as const,
+        id: shift.id,
+        shiftId: shift.id,
+        shift,
+        offeredBy: null,
+        createdAt: applications[0].createdAt,
+        // Même forme que ShiftOfferCandidate pour que les écrans manager
+        // traitent les deux sortes d'entrées de la même façon.
+        candidates: applications.map((a) => ({ id: a.id, offerId: a.shiftId, userId: a.userId, createdAt: a.createdAt })),
+      })),
+    ];
   }
 
   async update(companyId: string, id: string, dto: UpdateShiftDto) {
@@ -210,6 +261,7 @@ export class ShiftsService {
 
     await this.prisma.$transaction([
       this.prisma.shiftOffer.deleteMany({ where: { shiftAssignmentId: { in: assignmentIds } } }),
+      this.prisma.shiftApplication.deleteMany({ where: { shiftId: id } }),
       this.prisma.shiftAssignment.deleteMany({ where: { shiftId: id } }),
       this.prisma.shift.delete({ where: { id } }),
     ]);
@@ -246,6 +298,10 @@ export class ShiftsService {
     const assignment = await this.prisma.shiftAssignment.create({
       data: { shiftId, userId: dto.userId, status: 'assigned' },
     });
+    // Le créneau n'est plus libre : les candidatures du marché (ShiftApplication)
+    // n'ont plus d'objet, quelle que soit la façon dont il a été pourvu
+    // (glisser-déposer sur le planning ou validation d'un candidat).
+    await this.prisma.shiftApplication.deleteMany({ where: { shiftId } });
     // Assigner un employé sur la grille est aussi un geste de préparation du
     // planning (souvent sur un brouillon) — pas d'émission ici, seule la
     // publication (update() avec status: 'published') prévient les autres
@@ -385,6 +441,74 @@ export class ShiftsService {
 
     this.realtime.emitToCompany(companyId, 'shifts:changed');
     return updatedOffer;
+  }
+
+  // Un employé candidate sur un créneau libre du marché (kind 'open_shift').
+  // Comme acceptOffer, rien n'est attribué tant que le manager n'a pas choisi
+  // (approveOpenShift) ; on vérifie quand même tout de suite disponibilité
+  // déclarée et chevauchement, pour un retour immédiat — revérifiés à la
+  // validation par assign().
+  async applyToOpenShift(companyId: string, applicant: AuthenticatedUser, shiftId: string) {
+    const shift = await this.prisma.shift.findFirst({
+      where: { id: shiftId, ...openShiftWhere(companyId) },
+      include: { site: { select: { timezone: true } } },
+    });
+    if (!shift) {
+      throw new NotFoundException("Ce créneau n'est plus disponible");
+    }
+
+    // Même règle que le marché affiché (listOpenOffers) : un employé rattaché
+    // à un magasin ne candidate que sur les créneaux de ce magasin.
+    const requester = await this.prisma.user.findFirst({
+      where: { id: applicant.userId, companyId },
+      select: { siteId: true },
+    });
+    if (requester?.siteId && requester.siteId !== shift.siteId) {
+      throw new ForbiddenException('Ce créneau concerne un autre magasin');
+    }
+
+    const existing = await this.prisma.shiftApplication.findFirst({
+      where: { shiftId, userId: applicant.userId },
+    });
+    if (existing) {
+      throw new BadRequestException('Vous avez déjà candidaté pour ce créneau');
+    }
+
+    await this.ensureAvailable(applicant.userId, shift.startsAt, shift.endsAt, shift.site.timezone ?? 'Europe/Brussels');
+    await this.ensureNoOverlap(applicant.userId, shift.startsAt, shift.endsAt, shiftId);
+
+    const application = await this.prisma.shiftApplication.create({
+      data: { shiftId, userId: applicant.userId },
+    });
+    this.realtime.emitToCompany(companyId, 'shifts:changed');
+    return application;
+  }
+
+  // Le manager choisit UN candidat sur un créneau libre : assign() fait
+  // toutes les vérifications (créneau toujours libre, disponibilité,
+  // chevauchement) et efface les autres candidatures.
+  async approveOpenShift(companyId: string, shiftId: string, dto: ApproveShiftOfferDto) {
+    const application = await this.prisma.shiftApplication.findFirst({
+      where: { shiftId, userId: dto.userId, shift: { site: { companyId } } },
+    });
+    if (!application) {
+      throw new NotFoundException("Cet employé n'a pas candidaté pour ce créneau");
+    }
+
+    const assignment = await this.assign(companyId, shiftId, { userId: dto.userId });
+    this.realtime.emitToCompany(companyId, 'shifts:changed');
+    return assignment;
+  }
+
+  // Le manager refuse toutes les candidatures sans choisir personne — le
+  // créneau reste libre et donc toujours affiché sur le marché.
+  async rejectOpenShiftApplications(companyId: string, shiftId: string) {
+    const shift = await this.prisma.shift.findFirst({ where: { id: shiftId, site: { companyId } } });
+    if (!shift) {
+      throw new NotFoundException('Shift introuvable');
+    }
+    await this.prisma.shiftApplication.deleteMany({ where: { shiftId } });
+    this.realtime.emitToCompany(companyId, 'shifts:changed');
   }
 
   private async findOwnedAssignment(companyId: string, id: string) {
@@ -578,5 +702,16 @@ function zonedParts(
     day: Number(parts.day),
     weekday: WEEKDAY_INDEX[parts.weekday] ?? 0,
     minutesOfDay: Number(parts.hour) * 60 + Number(parts.minute),
+  };
+}
+
+// Un shift « libre » au sens du marché : publié (un brouillon n'est visible
+// de personne, décision #15), à venir, et sans aucune assignation active.
+function openShiftWhere(companyId: string) {
+  return {
+    site: { companyId },
+    status: 'published' as const,
+    startsAt: { gt: new Date() },
+    assignments: { none: { status: { not: 'cancelled' as const } } },
   };
 }

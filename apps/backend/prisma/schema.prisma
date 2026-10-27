@@ -133,6 +133,7 @@ model User {
   createdTimeEntries  TimeEntry[]       @relation("CreatedByManager")
   shiftAssignments    ShiftAssignment[]
   shiftOfferCandidacies ShiftOfferCandidate[]
+  shiftApplications     ShiftApplication[]
   availabilities      Availability[]
   auditLogs           AuditLog[]
 
@@ -187,7 +188,8 @@ model Shift {
   status     ShiftStatus @default(draft)
   createdBy  String      @map("created_by")
 
-  assignments ShiftAssignment[]
+  assignments  ShiftAssignment[]
+  applications ShiftApplication[]
 
   @@map("shifts")
 }
@@ -240,6 +242,24 @@ model ShiftOfferCandidate {
   // Un même employé ne candidate qu'une fois par offre.
   @@unique([offerId, userId])
   @@map("shift_offer_candidates")
+}
+
+// Candidature d'un employé sur un shift publié resté sans titulaire (ligne
+// « Shifts disponibles » du planning) — même logique que ShiftOfferCandidate
+// pour le marché d'échange : plusieurs candidats possibles, le manager en
+// choisit un (ShiftsService.approveOpenShift). Distinct de ShiftOffer, qui
+// exige une assignation existante à céder.
+model ShiftApplication {
+  id        String   @id @default(uuid())
+  shiftId   String   @map("shift_id")
+  shift     Shift    @relation(fields: [shiftId], references: [id])
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Un même employé ne candidate qu'une fois par shift.
+  @@unique([shiftId, userId])
+  @@map("shift_applications")
 }
 
 model Availability {

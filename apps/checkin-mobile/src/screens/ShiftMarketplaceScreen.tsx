@@ -44,7 +44,7 @@ export function ShiftMarketplaceScreen() {
 
   const load = useCallback(async () => {
     const [shifts, offers, userList, siteList] = await Promise.all([
-      apiClient.getShifts(),
+      apiClient.getShifts({ mine: true }),
       apiClient.getOpenShiftOffers(),
       apiClient.getUsers(),
       apiClient.getSites(),

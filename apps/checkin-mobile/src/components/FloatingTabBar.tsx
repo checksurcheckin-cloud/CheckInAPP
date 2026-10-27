@@ -9,8 +9,6 @@ const TAB_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   Planning: 'calendar-outline',
   ShiftMarketplace: 'swap-horizontal-outline',
   Availabilities: 'checkmark-circle-outline',
-  PresenceLive: 'people-outline',
-  ShiftApproval: 'shield-checkmark-outline',
   Profile: 'person-outline',
 };
 
@@ -19,8 +17,6 @@ const TAB_LABELS: Record<string, string> = {
   Planning: 'Planning',
   ShiftMarketplace: 'Shifts',
   Availabilities: 'Dispos',
-  PresenceLive: 'Présence',
-  ShiftApproval: 'Échanges',
   Profile: 'Profil',
 };
 

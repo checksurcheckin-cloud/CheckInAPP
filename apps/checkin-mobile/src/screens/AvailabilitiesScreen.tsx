@@ -166,9 +166,13 @@ export function AvailabilitiesScreen() {
   const [recurringPromptDay, setRecurringPromptDay] = useState<number | null>(null);
 
   const load = useCallback(async () => {
-    const list = await apiClient.getAvailabilities();
+    // userId explicite : sans lui, un manager recevrait les dispos de toute
+    // l'entreprise (le serveur ne restreint d'office que les employés) et
+    // l'écran les mélangerait avec les siennes.
+    if (!user) return;
+    const list = await apiClient.getAvailabilities(user.id);
     setAvailabilities(list);
-  }, []);
+  }, [user]);
 
   useFocusEffect(
     useCallback(() => {

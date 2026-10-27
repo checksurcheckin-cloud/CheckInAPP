@@ -12,8 +12,10 @@ Cible : PME de 20-100 employés par site.
 
 - **`apps/backend`** — API NestJS + PostgreSQL (Prisma), sert les 3 clients.
 - **`apps/checkin-mobile`** — App mobile (Expo/React Native) unique pour staff ET
-  managers. L'UI/navigation s'adapte selon `user.role`. Ne permet PAS la création
-  d'horaires (lecture seule des plannings).
+  managers, **identique pour tous les rôles** : un manager y a exactement l'app
+  d'un employé (son planning, ses dispos, le marché, le pointage). Tout l'espace
+  manager est exclusivement sur web-manager (décision #31). Ne permet PAS la
+  création d'horaires (lecture seule des plannings).
 - **`apps/checkin-pos`** — App tablette (Expo/React Native), mode kiosk, fixée sur
   le lieu de travail (caisse, vestiaire). C'est le terminal de pointage physique.
   **Ne s'authentifie PAS comme un utilisateur** — s'authentifie comme un
@@ -445,8 +447,8 @@ Cible : PME de 20-100 employés par site.
       les candidatures sont effacées.
     - `GET /shift-offers/pending` (nouveau, `listPendingOffersForManager`,
       admin/manager) alimente la page "Échanges à valider"
-      (web-manager `ShiftApprovalPage`, checkin-mobile
-      `ShiftApprovalScreen`) : **toutes** les offres encore ouvertes de
+      (web-manager `ShiftApprovalPage` ; l'écran mobile équivalent a été
+      retiré, décision #31) : **toutes** les offres encore ouvertes de
       l'entreprise, candidatures comprises — y compris celles à zéro
       candidat, pour que le manager voie ce qui traîne sans preneur sur le
       marché, pas seulement ce qui est prêt à valider. Le manager choisit
@@ -507,8 +509,8 @@ Cible : PME de 20-100 employés par site.
       `AuthService.tsx` (web-manager, checkin-mobile) ouvrent la connexion
       dès qu'un `user` est authentifié (login ou session restaurée) et la
       ferment au logout ; le socket est exposé via `useAuth().socket`.
-    - `PresenceLivePage`/`PresenceLiveScreen` gardent leur polling existant
-      (30s web, aucun avant côté mobile) **en filet de sécurité** — le
+    - `PresenceLivePage` garde son polling existant (30s) **en filet de
+      sécurité** (l'écran mobile équivalent a été retiré, décision #31) — le
       websocket accélère juste le rafraîchissement, il ne le remplace pas.
 
 24. **Une ligne `Availability` avec `isAvailable: true` doit toujours être
@@ -750,10 +752,29 @@ Cible : PME de 20-100 employés par site.
       que soit la voie (validation d'un candidat ou glisser-déposer sur le
       planning) ; `remove()` les supprime avant le shift (contrainte FK) ;
       changer le site d'un employé efface ses candidatures à venir.
-    - « Échanges à valider » (web + mobile) n'affiche un créneau libre que
+    - « Échanges à valider » (web-manager) n'affiche un créneau libre que
       s'il a au moins un candidat — sans candidat, il est déjà visible sur la
       ligne « Shifts disponibles ». Le client API choisit la bonne route selon
       `kind` (`applyToMarketEntry`, `approveMarketEntry`, `rejectMarketEntry`).
+
+31. **checkin-mobile est identique pour tous les rôles : un manager n'y a
+    PAS d'espace manager.** Plus d'onglets Présence ni Échanges conditionnés
+    au rôle (`PresenceLiveScreen`, `ShiftApprovalScreen` supprimés) — toute
+    la gestion (présence en direct, validation des échanges et candidatures,
+    planning, équipe…) se fait uniquement dans web-manager. Ne pas
+    réintroduire d'écran ou d'onglet conditionné à `user.role` dans l'app
+    mobile sans décision produit explicite.
+    - Conséquence côté données : le serveur scope par rôle (un manager reçoit
+      tout le site), donc l'app mobile demande explicitement « les miennes »
+      pour se comporter comme pour un employé : `GET /shifts?mine=true`
+      (shifts publiés assignés à l'appelant, même filtre qu'un employé —
+      Planning et Marché) et `GET /availabilities?userId=<moi>` (écran
+      Dispos). Sans ce dernier, un manager recevait les dispos de toute
+      l'entreprise mélangées aux siennes, et une bascule pouvait modifier la
+      ligne d'un autre employé.
+    - Pas de blocage API par client (décision #5 inchangée) : un manager
+      garde tous ses droits via l'API, c'est seulement l'app mobile qui ne
+      les expose plus.
 
 ## Stack
 
@@ -797,8 +818,7 @@ reste "à faire".
   assignation d'un shift (décision #8)
 - Géocodage d'adresses (Nominatim) pour la création de sites et la résolution
   d'adresse en présence en direct (décision #10)
-- Présence en direct (web-manager `PresenceLivePage` + checkin-mobile
-  `PresenceLiveScreen`) avec badge de source de pointage et distance GPS
+- Présence en direct (web-manager `PresenceLivePage`) avec badge de source de pointage et distance GPS
   colorée par seuil
 - Écrans réels sur les 3 apps :
   - **checkin-mobile** : Login, Pointage (QR rotatif + fallback badge/PIN),
@@ -809,7 +829,7 @@ reste "à faire".
     « jusqu'à », pas les deux — via « Préciser une plage horaire », voir
     décision #8 ; rebasculer un jour récurrent vers Disponible ouvre un
     choix garder-la-récurrence/annuler, décision #18), Marché de shifts,
-    Validation d'échanges, Présence en direct, Profil (logout)
+    Profil (logout) — les mêmes écrans pour tous les rôles (décision #31)
   - **checkin-pos** : Pairing d'appareil, Accueil kiosk (scan QR), Saisie PIN,
     Enrôlement badge, Écran hors-ligne
   - **web-manager** : Login, Planning (grille employés x jours, création/

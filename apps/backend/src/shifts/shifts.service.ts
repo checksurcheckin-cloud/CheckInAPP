@@ -58,8 +58,11 @@ export class ShiftsService {
   // "brouillon -> on assigne -> on publie" (voir CreateShiftDto.status,
   // défaut 'draft') n'a de sens que si un brouillon reste invisible côté
   // mobile même une fois assigné, sinon publier ne changerait rien.
+  //
+  // `mine=true` applique ce même filtre "employé" à n'importe quel rôle : sur
+  // checkin-mobile, un manager a exactement l'app d'un employé (décision #31).
   findAll(user: AuthenticatedUser, query: FindShiftsQueryDto) {
-    const isEmployee = user.role === 'employee';
+    const isEmployee = user.role === 'employee' || query.mine === 'true';
 
     return this.prisma.shift.findMany({
       where: {

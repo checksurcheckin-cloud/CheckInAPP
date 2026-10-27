@@ -19,17 +19,17 @@ import { PlanningScreen } from './src/screens/PlanningScreen'; // lecture seule
 import { ProfileScreen } from './src/screens/ProfileScreen';
 
 // Écrans manager uniquement
-import { PresenceLiveScreen } from './src/screens/PresenceLiveScreen';
-import { ShiftApprovalScreen } from './src/screens/ShiftApprovalScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
 /**
- * Point d'entrée. UNE SEULE app pour staff et managers — la navigation
- * s'adapte selon `currentUser.role`. Ne JAMAIS ajouter d'écran de création
- * d'horaires ici, même pour les managers : c'est exclusif à web-manager
- * (voir CLAUDE.md, décision d'architecture).
+ * Point d'entrée. UNE SEULE app, IDENTIQUE pour tous les rôles : un manager
+ * y a exactement les écrans d'un employé (son propre planning, ses dispos,
+ * le marché, le pointage). Tout ce qui relève de la gestion (présence en
+ * direct, validation des échanges, création d'horaires...) est exclusif à
+ * web-manager — voir CLAUDE.md, décision #31. Ne pas réintroduire d'écran
+ * ou d'onglet conditionné au rôle ici.
  */
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -82,15 +82,11 @@ function RootNavigator() {
 }
 
 function MainTabs() {
-  const { user } = useAuth();
-  const isManager = user?.role === 'manager' || user?.role === 'admin';
-
   return (
     <Tab.Navigator
       tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={{ headerShown: false }}
     >
-      {/* Écrans communs à tous les rôles */}
       <Tab.Screen name="ClockIn" component={ClockInScreen} options={{ title: 'Pointage' }} />
       <Tab.Screen name="Planning" component={PlanningScreen} options={{ title: 'Planning' }} />
       <Tab.Screen
@@ -103,23 +99,6 @@ function MainTabs() {
         component={AvailabilitiesScreen}
         options={{ title: 'Dispos' }}
       />
-
-      {/* Écrans manager uniquement */}
-      {isManager ? (
-        <>
-          <Tab.Screen
-            name="PresenceLive"
-            component={PresenceLiveScreen}
-            options={{ title: 'Présence' }}
-          />
-          <Tab.Screen
-            name="ShiftApproval"
-            component={ShiftApprovalScreen}
-            options={{ title: 'Échanges' }}
-          />
-        </>
-      ) : null}
-
       <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profil' }} />
     </Tab.Navigator>
   );

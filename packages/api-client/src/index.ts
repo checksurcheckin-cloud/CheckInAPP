@@ -295,8 +295,11 @@ export class ApiClient {
   }
 
   // ---- Shifts ----
-  getShifts(params?: { siteId?: string; from?: string; to?: string }) {
-    return this.request<Shift[]>('GET', `/shifts${toQueryString(params)}`);
+  // `mine: true` : uniquement mes shifts publiés, même pour un manager —
+  // utilisé par checkin-mobile, identique pour tous les rôles (décision #31).
+  getShifts(params?: { siteId?: string; from?: string; to?: string; mine?: boolean }) {
+    const { mine, ...rest } = params ?? {};
+    return this.request<Shift[]>('GET', `/shifts${toQueryString({ ...rest, mine: mine ? 'true' : undefined })}`);
   }
 
   // Écriture réservée en pratique à web-manager (choix produit — un manager

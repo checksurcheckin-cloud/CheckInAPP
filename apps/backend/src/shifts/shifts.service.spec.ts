@@ -121,6 +121,17 @@ describe('ShiftsService', () => {
       expect(call.include.assignments.where).toBeUndefined();
       expect(call.where.site).toEqual({ companyId: 'company-a' });
     });
+
+    it('with mine=true, scopes a manager like an employee: own published shifts only (mobile app)', async () => {
+      prisma.shift.findMany.mockResolvedValue([]);
+
+      await service.findAll({ userId: 'manager-1', companyId: 'company-a', role: 'manager' }, { mine: 'true' });
+
+      const call = prisma.shift.findMany.mock.calls[0][0];
+      expect(call.where.assignments).toEqual({ some: { userId: 'manager-1' } });
+      expect(call.where.status).toBe('published');
+      expect(call.include.assignments.where).toEqual({ userId: 'manager-1' });
+    });
   });
 
   describe('create', () => {

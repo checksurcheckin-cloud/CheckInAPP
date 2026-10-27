@@ -75,7 +75,7 @@ export function PlanningScreen() {
   const listRef = useRef<FlatList<Shift> | null>(null);
 
   const load = useCallback(async () => {
-    const [shiftList, siteList] = await Promise.all([apiClient.getShifts(), apiClient.getSites()]);
+    const [shiftList, siteList] = await Promise.all([apiClient.getShifts({ mine: true }), apiClient.getSites()]);
     setShifts(shiftList.slice().sort((a, b) => a.startsAt.localeCompare(b.startsAt)));
     setSites(siteList);
   }, []);

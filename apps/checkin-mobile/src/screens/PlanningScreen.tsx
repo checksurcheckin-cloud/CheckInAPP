@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Animated, StyleSheet, RefreshControl, Pressable } from 'react-native';
+import { View, Text, Animated, FlatList, StyleSheet, RefreshControl, Pressable } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '@horaires/ui-tokens';
@@ -70,7 +70,9 @@ export function PlanningScreen() {
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(today));
   const [gridHeight, setGridHeight] = useState<number | null>(null);
   const scrollY = useRef(new Animated.Value(0)).current;
-  const listRef = useRef<Animated.FlatList<Shift> | null>(null);
+  // Instance FlatList sous-jacente (Animated.FlatList n'est plus générique
+  // dans les types de React Native 0.88).
+  const listRef = useRef<FlatList<Shift> | null>(null);
 
   const load = useCallback(async () => {
     const [shiftList, siteList] = await Promise.all([apiClient.getShifts(), apiClient.getSites()]);

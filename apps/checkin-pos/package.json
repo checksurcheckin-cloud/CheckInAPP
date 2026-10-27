@@ -10,19 +10,20 @@
     "build": "echo 'build géré via EAS Build, pas via turbo pour le mobile'"
   },
   "dependencies": {
+    "@expo/dom-webview": "~58.0.2",
     "@horaires/api-client": "workspace:*",
     "@horaires/shared-types": "workspace:*",
     "@horaires/ui-tokens": "workspace:*",
-    "expo": "~57.0.22",
-    "expo-camera": "~57.0.5",
-    "expo-secure-store": "~57.0.4",
-    "expo-status-bar": "~57.0.1",
-    "react": "19.2.3",
-    "react-native": "0.86.3"
+    "expo": "~58.0.20",
+    "expo-camera": "~58.0.13",
+    "expo-secure-store": "~58.0.2",
+    "expo-status-bar": "~58.0.4",
+    "react": "19.3.0",
+    "react-native": "0.88.0"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
-    "@types/react": "~19.2.18",
+    "@types/react": "~19.3.0",
     "typescript": "~6.0.3"
   }
 }

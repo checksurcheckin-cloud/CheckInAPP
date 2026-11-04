@@ -3,6 +3,7 @@ import { UserPlus, RefreshCw, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { Site, User, UserRole, UserStatus } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
+import { SiteSelect } from '../components/SiteSelect';
 import { Dialog } from '../components/Dialog';
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -38,6 +39,10 @@ export function TeamPage() {
   const [revealedPins, setRevealedPins] = useState<Record<string, string | null>>({});
   const [pinToRegenerate, setPinToRegenerate] = useState<User | null>(null);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  // Filtre de la liste : '' = tous les magasins, 'none' = employés sans
+  // magasin, sinon l'id d'un site (seulement les employés qui y sont
+  // rattachés — managers/admins n'apparaissent que sous « Tous »).
+  const [siteFilter, setSiteFilter] = useState('');
 
   const load = async () => {
     setIsLoading(true);
@@ -184,9 +189,25 @@ export function TeamPage() {
     return !(u.status === 'active' && activeAdminCount <= 1);
   };
 
+  const visibleUsers =
+    siteFilter === ''
+      ? users
+      : siteFilter === 'none'
+        ? users.filter((u) => u.role === 'employee' && !u.siteId)
+        : users.filter((u) => u.siteId === siteFilter);
+
   return (
     <div>
-      <h1 style={styles.title}>Équipe</h1>
+      <div style={styles.headerRow}>
+        <h1 style={{ ...styles.title, marginBottom: 0 }}>Équipe</h1>
+        <SiteSelect
+          sites={sites}
+          value={siteFilter}
+          onChange={setSiteFilter}
+          allOptionLabel="Tous les magasins"
+          extraOptions={[{ value: 'none', label: 'Sans magasin' }]}
+        />
+      </div>
 
       <form style={styles.inviteForm} onSubmit={invite}>
         <h2 style={styles.sectionTitle}>Inviter un employé</h2>
@@ -254,7 +275,14 @@ export function TeamPage() {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {visibleUsers.length === 0 ? (
+              <tr>
+                <td style={styles.td} colSpan={9}>
+                  <span style={styles.muted}>Aucun employé pour ce magasin.</span>
+                </td>
+              </tr>
+            ) : null}
+            {visibleUsers.map((u) => (
               <tr key={u.id}>
                 <td style={styles.td}>
                   {u.firstName} {u.lastName}
@@ -390,6 +418,13 @@ export function TeamPage() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  headerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
   title: { fontSize: typography.sizes['2xl'], fontWeight: 700, color: colors.textPrimary, marginBottom: spacing.lg },
   sectionTitle: { fontSize: typography.sizes.md, fontWeight: 700, color: colors.textPrimary, margin: 0, marginBottom: spacing.sm },
   inviteForm: {

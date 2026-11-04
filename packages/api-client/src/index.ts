@@ -1,4 +1,5 @@
 import type {
+  SiteScope,
   ClockInSettings,
   AuthResponse,
   Availability,
@@ -290,6 +291,17 @@ export class ApiClient {
       geoLat,
       geoLng,
     });
+  }
+
+  // Magasins que l'utilisateur connecté gère (tous pour un admin ou un
+  // manager sans restriction).
+  getMyScope() {
+    return this.request<SiteScope>('GET', '/users/me/scope');
+  }
+
+  // Admin : magasins gérés par un manager ([] = tous les magasins).
+  setManagedSites(userId: string, siteIds: string[]) {
+    return this.request<User>('PATCH', `/users/${userId}/managed-sites`, { siteIds });
   }
 
   // Réglages de pointage résolus de l'utilisateur connecté — checkin-mobile

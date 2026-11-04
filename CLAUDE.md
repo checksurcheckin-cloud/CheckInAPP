@@ -901,6 +901,36 @@ Cible : PME de 20-100 employés par site.
       « Pointage QR » à côté de « Pointage GPS » dans Équipe (même sélecteur
       tri-state hériter/activé/désactivé).
 
+36. **Manager par magasin : un manager peut être limité à un ou plusieurs
+    magasins ; sans magasin coché, il gère tous les magasins (comme avant).**
+    L'admin gère toujours tout. Appliqué côté backend, route par route.
+    - Modèle `ManagedSite` (`userId`, `siteId`, clé composite, `onDelete:
+      Cascade` des deux côtés). Aucune ligne = tous les magasins : tous les
+      comptes manager existants gardent exactement leurs droits. Attribué
+      par l'admin seul dans Équipe (`PATCH /users/:id/managed-sites`,
+      `ManagedSitesDialog`, sites revalidés dans l'entreprise) ; passer un
+      manager à un autre rôle efface ses magasins gérés.
+    - `SiteScopeService` (`src/site-scope`, module `@Global`) : les
+      **contrôleurs** vérifient le périmètre avant de déléguer au service
+      métier, sur l'entité réellement ciblée rechargée et rescopée par
+      `companyId` (`ensureShift`, `ensureOffer`, `ensureTimeEntry`,
+      `ensureDevice`, `ensureUser`, `ensureSite`) — jamais sur un `siteId`
+      client seul. Hors périmètre = 403. Listes filtrées côté requête :
+      `GET /shifts` (manager, hors `mine=true`) et
+      `GET /shift-offers/pending`.
+    - Manager limité : agit seulement sur les employés de ses magasins ou
+      pas encore rattachés, jamais sur un autre manager/admin ; n'invite que
+      des employés rattachés à un de ses magasins ; ne change aucun rôle (promouvoir
+      quelqu'un manager lui donnerait tous les magasins) ; ne crée
+      pas de site (`ensureAllSites`) mais modifie les siens.
+    - Restent volontairement non filtrés (lecture d'annuaire, aussi utilisés
+      par l'app mobile pour afficher des noms) : `GET /sites`, `GET /users`,
+      `GET /availabilities`. web-manager filtre ses listes déroulantes via
+      `GET /users/me/scope` (`lib/siteScope.ts` → `loadManagedSites`) :
+      Planning, Présence, Sites (formulaire de création masqué), Équipe
+      (employés hors périmètre masqués, rôle non modifiable).
+    - checkin-mobile n'est pas concerné (décision #31).
+
 ## Stack
 
 - Backend : NestJS + PostgreSQL + Prisma + Passport/JWT

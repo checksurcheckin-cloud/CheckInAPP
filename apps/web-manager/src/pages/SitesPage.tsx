@@ -3,6 +3,7 @@ import { MapPin, Plus, Search, Trash2, Pencil, X } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { GeocodeCandidate, Site } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
+import { loadManagedSites } from '../lib/siteScope';
 
 type FormState = {
   name: string;
@@ -19,6 +20,9 @@ export function SitesPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [sites, setSites] = useState<Site[]>([]);
+  // Manager limité à certains magasins (décision #36) : il ne voit et ne
+  // modifie que les siens, et ne peut pas en créer.
+  const [allSites, setAllSites] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
 
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
@@ -32,7 +36,9 @@ export function SitesPage() {
   const load = async () => {
     setIsLoading(true);
     try {
-      setSites(await apiClient.getSites());
+      const { sites: managed, scope } = await loadManagedSites();
+      setSites(managed);
+      setAllSites(scope.allSites);
     } finally {
       setIsLoading(false);
     }
@@ -130,6 +136,7 @@ export function SitesPage() {
     <div>
       <h1 style={styles.title}>Sites</h1>
 
+      {allSites || editingSiteId ? (
       <form style={styles.formCard} onSubmit={submit}>
         <h2 style={styles.sectionTitle}>{editingSiteId ? 'Modifier le site' : 'Ajouter un site'}</h2>
 
@@ -204,6 +211,7 @@ export function SitesPage() {
           ) : null}
         </div>
       </form>
+      ) : null}
 
       {isLoading ? (
         <p style={styles.muted}>Chargement…</p>

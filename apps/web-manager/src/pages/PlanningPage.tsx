@@ -13,6 +13,7 @@ import { colors, spacing, radius, typography, shadows, shiftPalette } from '@hor
 import type { Availability, ProposeShiftOnMarketPayload, Shift, Site, User } from '@horaires/shared-types';
 import { ApiError } from '@horaires/api-client';
 import { apiClient, useAuth } from '../services/AuthService';
+import { loadManagedSites } from '../lib/siteScope';
 import { SiteSelect } from '../components/SiteSelect';
 import { PlanningGridCell } from '../components/PlanningGridCell';
 import { EmployeeRowHeader } from '../components/EmployeeRowHeader';
@@ -113,7 +114,8 @@ export function PlanningPage() {
   }, [hasTemplates]);
 
   useEffect(() => {
-    apiClient.getSites().then((list) => {
+    // Seulement les magasins gérés (décision #36).
+    loadManagedSites().then(({ sites: list }) => {
       setSites(list);
       setSelectedSiteId((current) => current ?? list[0]?.id ?? null);
     });

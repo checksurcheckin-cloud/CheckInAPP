@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { UserPlus, RefreshCw, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
-import type { Site, User, UserRole, UserStatus } from '@horaires/shared-types';
+import type { Site, SiteScope, User, UserRole, UserStatus } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
 import { SiteSelect } from '../components/SiteSelect';
+import { ManagedSitesDialog, managedSitesLabel } from '../components/ManagedSitesDialog';
+import { loadManagedSites } from '../lib/siteScope';
 import { Dialog } from '../components/Dialog';
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -43,13 +45,24 @@ export function TeamPage() {
   // magasin, sinon l'id d'un site (seulement les employés qui y sont
   // rattachés — managers/admins n'apparaissent que sous « Tous »).
   const [siteFilter, setSiteFilter] = useState('');
+  // Périmètre de l'appelant (décision #36) : un manager limité ne voit que
+  // les employés de ses magasins (et ceux pas encore rattachés).
+  const [scope, setScope] = useState<SiteScope | null>(null);
+  const scoped = scope !== null && !scope.allSites;
+  const [managedTarget, setManagedTarget] = useState<User | null>(null);
 
   const load = async () => {
     setIsLoading(true);
     try {
-      const [list, siteList] = await Promise.all([apiClient.getUsers(), apiClient.getSites()]);
+      const [list, managed] = await Promise.all([apiClient.getUsers(), loadManagedSites()]);
       setUsers(list);
-      setSites(siteList);
+      setSites(managed.sites);
+      setScope(managed.scope);
+      // Manager limité : un employé invité doit être rattaché à un de ses
+      // magasins (le backend le refuse sinon).
+      if (!managed.scope.allSites) {
+        setInviteSiteId((current) => current || managed.sites[0]?.id || '');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -75,7 +88,7 @@ export function TeamPage() {
       setFirstName('');
       setLastName('');
       setRole('employee');
-      setInviteSiteId('');
+      if (!scoped) setInviteSiteId('');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Échec de l'invitation");
@@ -189,12 +202,15 @@ export function TeamPage() {
     return !(u.status === 'active' && activeAdminCount <= 1);
   };
 
+  const scopedUsers = scoped
+    ? users.filter((u) => u.role === 'employee' && (!u.siteId || scope!.siteIds.includes(u.siteId)))
+    : users;
   const visibleUsers =
     siteFilter === ''
-      ? users
+      ? scopedUsers
       : siteFilter === 'none'
-        ? users.filter((u) => u.role === 'employee' && !u.siteId)
-        : users.filter((u) => u.siteId === siteFilter);
+        ? scopedUsers.filter((u) => u.role === 'employee' && !u.siteId)
+        : scopedUsers.filter((u) => u.siteId === siteFilter);
 
   return (
     <div>
@@ -231,12 +247,14 @@ export function TeamPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
-          <select style={styles.input} value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
-            <option value="employee">Employé</option>
-            <option value="manager">Manager</option>
-          </select>
+          {scoped ? null : (
+            <select style={styles.input} value={role} onChange={(e) => setRole(e.target.value as UserRole)}>
+              <option value="employee">Employé</option>
+              <option value="manager">Manager</option>
+            </select>
+          )}
           <select style={styles.input} value={inviteSiteId} onChange={(e) => setInviteSiteId(e.target.value)}>
-            <option value="">Aucun site</option>
+            {scoped ? null : <option value="">Aucun site</option>}
             {sites.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -289,7 +307,7 @@ export function TeamPage() {
                 </td>
                 <td style={styles.td}>{u.email}</td>
                 <td style={styles.td}>
-                  {canEditAccess(u) ? (
+                  {canEditAccess(u) && !scoped ? (
                     <select
                       style={styles.inlineSelect}
                       value={u.role}
@@ -321,8 +339,21 @@ export function TeamPage() {
                         </option>
                       ))}
                     </select>
+                  ) : u.role === 'manager' && isAdmin ? (
+                    // Magasins gérés par ce manager (décision #36).
+                    <button
+                      type="button"
+                      className="btn"
+                      style={styles.inlineSelect}
+                      disabled={busyUserId === u.id}
+                      onClick={() => setManagedTarget(u)}
+                    >
+                      {managedSitesLabel(u, sites)} ▾
+                    </button>
                   ) : (
-                    <span style={styles.muted}>Tous les sites</span>
+                    <span style={styles.muted}>
+                      {u.role === 'manager' ? managedSitesLabel(u, sites) : 'Tous les magasins'}
+                    </span>
                   )}
                 </td>
                 <td style={styles.td}>
@@ -398,6 +429,16 @@ export function TeamPage() {
         </table>
         </div>
       )}
+
+      <ManagedSitesDialog
+        manager={managedTarget}
+        sites={sites}
+        onClose={() => setManagedTarget(null)}
+        onSave={async (userId, siteIds) => {
+          await apiClient.setManagedSites(userId, siteIds);
+          await load();
+        }}
+      />
 
       <Dialog
         open={pinToRegenerate !== null}

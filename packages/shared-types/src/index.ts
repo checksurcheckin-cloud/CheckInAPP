@@ -41,6 +41,13 @@ export interface Company {
   createdAt: string;
 }
 
+// Périmètre magasins de l'utilisateur connecté (manager limité à certains
+// magasins, ou tous).
+export interface SiteScope {
+  allSites: boolean;
+  siteIds: string[];
+}
+
 // Réglages de pointage résolus pour l'utilisateur connecté (surcharge
 // individuelle > réglage entreprise ; GPS jamais actif sans pointage mobile).
 export interface ClockInSettings {
@@ -71,6 +78,8 @@ export interface User {
   gpsClockInEnabled?: boolean | null;
   // Même principe pour le pointage depuis l'app mobile.
   mobileClockInEnabled?: boolean | null;
+  // Magasins gérés par un manager — vide = tous les magasins.
+  managedSites?: { siteId: string }[];
   // Site de rattachement, optionnel — null = pas encore assigné, reste
   // visible sur tous les sites de la grille planning (voir CLAUDE.md
   // décision #25).

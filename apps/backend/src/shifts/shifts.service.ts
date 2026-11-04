@@ -63,13 +63,20 @@ export class ShiftsService {
   //
   // `mine=true` applique ce même filtre "employé" à n'importe quel rôle : sur
   // checkin-mobile, un manager a exactement l'app d'un employé (décision #31).
-  findAll(user: AuthenticatedUser, query: FindShiftsQueryDto) {
+  // `scopeSiteIds` : magasins gérés par un manager limité (décision #36),
+  // null = tous. Le contrôleur a déjà vérifié qu'un `query.siteId` explicite
+  // en fait partie.
+  findAll(user: AuthenticatedUser, query: FindShiftsQueryDto, scopeSiteIds: string[] | null = null) {
     const isEmployee = user.role === 'employee' || query.mine === 'true';
 
     return this.prisma.shift.findMany({
       where: {
         site: { companyId: user.companyId },
-        ...(query.siteId ? { siteId: query.siteId } : {}),
+        ...(query.siteId
+          ? { siteId: query.siteId }
+          : scopeSiteIds && !isEmployee
+            ? { siteId: { in: scopeSiteIds } }
+            : {}),
         ...(query.from || query.to
           ? {
               startsAt: {
@@ -176,11 +183,12 @@ export class ShiftsService {
   // comprises — y compris celles qui n'ont encore trouvé aucun candidat,
   // pour que le manager sache qu'un shift proposé au marché est resté sans
   // preneur, pas seulement celles prêtes à valider.
-  async listPendingOffersForManager(companyId: string) {
+  async listPendingOffersForManager(companyId: string, scopeSiteIds: string[] | null = null) {
+    const siteFilter = scopeSiteIds ? { siteId: { in: scopeSiteIds } } : {};
     const offers = await this.prisma.shiftOffer.findMany({
       where: {
         status: 'open',
-        shiftAssignment: { shift: { site: { companyId } } },
+        shiftAssignment: { shift: { site: { companyId }, ...siteFilter } },
       },
       include: {
         shiftAssignment: { include: { shift: true } },
@@ -193,7 +201,7 @@ export class ShiftsService {
     // sans candidat sont déjà visibles sur la ligne « Shifts disponibles »
     // du planning, inutile de les répéter ici.
     const openShifts = await this.prisma.shift.findMany({
-      where: { ...openShiftWhere(companyId), applications: { some: {} } },
+      where: { ...openShiftWhere(companyId), ...siteFilter, applications: { some: {} } },
       include: { applications: { orderBy: { createdAt: 'asc' } } },
       orderBy: { startsAt: 'asc' },
     });

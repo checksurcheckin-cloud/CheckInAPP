@@ -7,6 +7,7 @@ import { Roles } from '../auth/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../auth/current-user.decorator';
 import { DeviceAuthGuard } from '../site-devices/device-auth.guard';
 import { CurrentDevice, AuthenticatedDevice } from '../site-devices/current-device.decorator';
+import { SiteScopeService } from '../site-scope/site-scope.service';
 import { TimeEntriesService } from './time-entries.service';
 import { CreateDeviceTimeEntryDto } from './dto/create-device-time-entry.dto';
 import { CreateSelfTimeEntryDto } from './dto/create-self-time-entry.dto';
@@ -18,7 +19,10 @@ import { ScanRotatingQrDto } from './dto/scan-rotating-qr.dto';
 @ApiTags('time-entries')
 @Controller('time-entries')
 export class TimeEntriesController {
-  constructor(private readonly timeEntriesService: TimeEntriesService) {}
+  constructor(
+    private readonly timeEntriesService: TimeEntriesService,
+    private readonly siteScope: SiteScopeService,
+  ) {}
 
   // Appelé par checkin-pos — badge_scan / pin_code, device authentifié.
   @Post('device')
@@ -49,7 +53,8 @@ export class TimeEntriesController {
   @Post('manual')
   @UseGuards(JwtAuthGuard, TenantScopeGuard, RolesGuard)
   @Roles('admin', 'manager')
-  createManual(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateManualTimeEntryDto) {
+  async createManual(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateManualTimeEntryDto) {
+    await this.siteScope.ensureSite(user, dto.siteId);
     return this.timeEntriesService.createManual(user, dto);
   }
 
@@ -62,11 +67,12 @@ export class TimeEntriesController {
   @Patch(':id')
   @UseGuards(JwtAuthGuard, TenantScopeGuard, RolesGuard)
   @Roles('admin', 'manager')
-  update(
+  async update(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: UpdateTimeEntryDto,
   ) {
+    await this.siteScope.ensureTimeEntry(user, id);
     return this.timeEntriesService.update(user.companyId, user.userId, id, dto);
   }
 }

@@ -12,20 +12,30 @@ import { AssignShiftDto } from './dto/assign-shift.dto';
 import { ApproveShiftOfferDto } from './dto/approve-shift-offer.dto';
 import { ProposeShiftOnMarketDto } from './dto/propose-shift-on-market.dto';
 import { FindShiftsQueryDto } from './dto/find-shifts-query.dto';
+import { SiteScopeService } from '../site-scope/site-scope.service';
 
 @ApiTags('shifts')
 @Controller()
 @UseGuards(JwtAuthGuard, TenantScopeGuard)
 export class ShiftsController {
-  constructor(private readonly shiftsService: ShiftsService) {}
+  // Chaque route manager vérifie d'abord le périmètre magasins (décision #36).
+  constructor(
+    private readonly shiftsService: ShiftsService,
+    private readonly siteScope: SiteScopeService,
+  ) {}
 
   @Get('shifts')
-  findAll(@CurrentUser() user: AuthenticatedUser, @Query() query: FindShiftsQueryDto) {
-    return this.shiftsService.findAll(user, query);
+  async findAll(@CurrentUser() user: AuthenticatedUser, @Query() query: FindShiftsQueryDto) {
+    if (user.role === 'employee' || query.mine === 'true') {
+      return this.shiftsService.findAll(user, query);
+    }
+    if (query.siteId) await this.siteScope.ensureSite(user, query.siteId);
+    return this.shiftsService.findAll(user, query, await this.siteScope.managedSiteIds(user));
   }
 
   @Get('shifts/:id')
-  findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+  async findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    if (user.role !== 'employee') await this.siteScope.ensureShift(user, id);
     return this.shiftsService.findOne(user.companyId, id);
   }
 
@@ -43,8 +53,8 @@ export class ShiftsController {
   @Get('shift-offers/pending')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  listPendingOffers(@CurrentUser() user: AuthenticatedUser) {
-    return this.shiftsService.listPendingOffersForManager(user.companyId);
+  async listPendingOffers(@CurrentUser() user: AuthenticatedUser) {
+    return this.shiftsService.listPendingOffersForManager(user.companyId, await this.siteScope.managedSiteIds(user));
   }
 
   // Écriture réservée en pratique au client web-manager (choix produit, pas
@@ -52,14 +62,17 @@ export class ShiftsController {
   @Post('shifts')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateShiftDto) {
+  async create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateShiftDto) {
+    await this.siteScope.ensureSite(user, dto.siteId);
     return this.shiftsService.create(user.companyId, user.userId, dto);
   }
 
   @Patch('shifts/:id')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateShiftDto) {
+  async update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateShiftDto) {
+    await this.siteScope.ensureShift(user, id);
+    if (dto.siteId) await this.siteScope.ensureSite(user, dto.siteId);
     return this.shiftsService.update(user.companyId, id, dto);
   }
 
@@ -67,14 +80,16 @@ export class ShiftsController {
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+  async remove(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    await this.siteScope.ensureShift(user, id);
     return this.shiftsService.remove(user.companyId, id);
   }
 
   @Post('shifts/:id/assign')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  assign(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: AssignShiftDto) {
+  async assign(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: AssignShiftDto) {
+    await this.siteScope.ensureShift(user, id);
     return this.shiftsService.assign(user.companyId, id, dto);
   }
 
@@ -89,7 +104,8 @@ export class ShiftsController {
   @Post('shifts/:id/applications/approve')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  approveOpenShift(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ApproveShiftOfferDto) {
+  async approveOpenShift(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ApproveShiftOfferDto) {
+    await this.siteScope.ensureShift(user, id);
     return this.shiftsService.approveOpenShift(user.companyId, id, dto);
   }
 
@@ -98,7 +114,8 @@ export class ShiftsController {
   @Post('shifts/:id/market')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  proposeOnMarket(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ProposeShiftOnMarketDto) {
+  async proposeOnMarket(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ProposeShiftOnMarketDto) {
+    await this.siteScope.ensureShift(user, id);
     return this.shiftsService.proposeOnMarket(user.companyId, id, dto);
   }
 
@@ -107,7 +124,8 @@ export class ShiftsController {
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
   @HttpCode(HttpStatus.NO_CONTENT)
-  rejectOpenShiftApplications(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+  async rejectOpenShiftApplications(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    await this.siteScope.ensureShift(user, id);
     return this.shiftsService.rejectOpenShiftApplications(user.companyId, id);
   }
 
@@ -128,14 +146,16 @@ export class ShiftsController {
   @Post('shift-offers/:id/approve')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  approveOffer(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ApproveShiftOfferDto) {
+  async approveOffer(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ApproveShiftOfferDto) {
+    await this.siteScope.ensureOffer(user, id);
     return this.shiftsService.approveOffer(user.companyId, id, dto);
   }
 
   @Post('shift-offers/:id/reject')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  rejectOffer(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+  async rejectOffer(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    await this.siteScope.ensureOffer(user, id);
     return this.shiftsService.rejectOffer(user.companyId, id);
   }
 }

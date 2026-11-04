@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { PresenceStatus, PresentEmployee, Site, TimeEntrySource } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
+import { loadManagedSites } from '../lib/siteScope';
 import { SiteSelect } from '../components/SiteSelect';
 import { PresenceDetailDialog } from '../components/PresenceDetailDialog';
 import { computeDayTotals, formatClockTime, formatDuration, formatElapsed, lastDeparture } from '../lib/presence';
@@ -86,7 +87,8 @@ export function PresenceLivePage() {
   const onSiteDuty = present.filter((e) => e.status !== 'left').length;
 
   useEffect(() => {
-    apiClient.getSites().then((list) => {
+    // Seulement les magasins gérés (décision #36).
+    loadManagedSites().then(({ sites: list }) => {
       setSites(list);
       setSelectedSiteId((current) => current ?? list[0]?.id ?? null);
     });

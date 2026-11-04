@@ -7,6 +7,7 @@ import { Roles } from '../auth/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../auth/current-user.decorator';
 import { TimeEntriesService } from '../time-entries/time-entries.service';
 import { SitesService } from './sites.service';
+import { SiteScopeService } from '../site-scope/site-scope.service';
 import { CreateSiteDto } from './dto/create-site.dto';
 import { UpdateSiteDto } from './dto/update-site.dto';
 
@@ -17,6 +18,7 @@ export class SitesController {
   constructor(
     private readonly sitesService: SitesService,
     private readonly timeEntriesService: TimeEntriesService,
+    private readonly siteScope: SiteScopeService,
   ) {}
 
   @Get()
@@ -31,7 +33,8 @@ export class SitesController {
   @Get(':id/presence')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  getPresence(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+  async getPresence(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    await this.siteScope.ensureSite(user, id);
     return this.timeEntriesService.getPresence(user.companyId, id);
   }
 
@@ -43,14 +46,18 @@ export class SitesController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSiteDto) {
+  async create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSiteDto) {
+    // Un manager limité à certains magasins ne crée pas de nouveau site
+    // (il n'en ferait de toute façon pas partie) — décision #36.
+    await this.siteScope.ensureAllSites(user);
     return this.sitesService.create(user.companyId, dto);
   }
 
   @Patch(':id')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateSiteDto) {
+  async update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateSiteDto) {
+    await this.siteScope.ensureSite(user, id);
     return this.sitesService.update(user.companyId, id, dto);
   }
 

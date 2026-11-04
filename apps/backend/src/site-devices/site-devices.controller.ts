@@ -8,6 +8,7 @@ import { CurrentUser, AuthenticatedUser } from '../auth/current-user.decorator';
 import { DeviceAuthGuard } from './device-auth.guard';
 import { CurrentDevice, AuthenticatedDevice } from './current-device.decorator';
 import { SiteDevicesService } from './site-devices.service';
+import { SiteScopeService } from '../site-scope/site-scope.service';
 import { CreateSiteDeviceDto } from './dto/create-site-device.dto';
 import { AuthenticateDeviceDto } from './dto/authenticate-device.dto';
 import { EnrollBadgeDto } from './dto/enroll-badge.dto';
@@ -16,7 +17,10 @@ import { FindSiteDevicesQueryDto } from './dto/find-site-devices-query.dto';
 @ApiTags('site-devices')
 @Controller('site-devices')
 export class SiteDevicesController {
-  constructor(private readonly siteDevicesService: SiteDevicesService) {}
+  constructor(
+    private readonly siteDevicesService: SiteDevicesService,
+    private readonly siteScope: SiteScopeService,
+  ) {}
 
   // Endpoint appelé par le terminal checkin-pos lui-même — pas de JWT
   // utilisateur ici, le device s'identifie avec son qrSecret.
@@ -50,14 +54,16 @@ export class SiteDevicesController {
   @Post()
   @UseGuards(JwtAuthGuard, TenantScopeGuard, RolesGuard)
   @Roles('admin', 'manager')
-  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSiteDeviceDto) {
+  async create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSiteDeviceDto) {
+    await this.siteScope.ensureSite(user, dto.siteId);
     return this.siteDevicesService.create(user.companyId, dto);
   }
 
   @Post(':id/rotate-secret')
   @UseGuards(JwtAuthGuard, TenantScopeGuard, RolesGuard)
   @Roles('admin', 'manager')
-  rotateSecret(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+  async rotateSecret(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    await this.siteScope.ensureDevice(user, id);
     return this.siteDevicesService.rotateSecret(user.companyId, id);
   }
 }

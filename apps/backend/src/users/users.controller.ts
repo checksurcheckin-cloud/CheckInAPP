@@ -6,6 +6,8 @@ import { TenantScopeGuard } from '../auth/tenant-scope.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CurrentUser, AuthenticatedUser } from '../auth/current-user.decorator';
+import { SiteScopeService } from '../site-scope/site-scope.service';
+import { SetManagedSitesDto } from './dto/set-managed-sites.dto';
 import { UsersService } from './users.service';
 import { RotatingQrService } from './rotating-qr.service';
 import { InviteUserDto } from './dto/invite-user.dto';
@@ -21,7 +23,16 @@ export class UsersController {
   constructor(
     private readonly usersService: UsersService,
     private readonly rotatingQrService: RotatingQrService,
+    private readonly siteScope: SiteScopeService,
   ) {}
+
+  // Périmètre de l'appelant (décision #36) : web-manager s'en sert pour ne
+  // proposer que ses magasins dans les listes déroulantes.
+  @Get('me/scope')
+  async getMyScope(@CurrentUser() user: AuthenticatedUser) {
+    const siteIds = await this.siteScope.managedSiteIds(user);
+    return { allSites: siteIds === null, siteIds: siteIds ?? [] };
+  }
 
   // `siteId` optionnel : filtre l'annuaire pour la grille planning d'un site
   // donné (voir UsersService.findAll) — omis, renvoie toute l'entreprise
@@ -61,14 +72,16 @@ export class UsersController {
   @Get(':id/pin')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  getPin(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+  async getPin(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    await this.siteScope.ensureUser(user, id);
     return this.usersService.getPin(user.companyId, id);
   }
 
   @Post(':id/pin/regenerate')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  regeneratePin(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+  async regeneratePin(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    await this.siteScope.ensureUser(user, id);
     return this.usersService.regeneratePin(user.companyId, id);
   }
 
@@ -80,58 +93,84 @@ export class UsersController {
   @Post('invite')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  invite(@CurrentUser() user: AuthenticatedUser, @Body() dto: InviteUserDto) {
+  async invite(@CurrentUser() user: AuthenticatedUser, @Body() dto: InviteUserDto) {
+    // Manager limité : uniquement des employés, rattachés à un de ses magasins.
+    if (await this.siteScope.managedSiteIds(user)) {
+      if (dto.role && dto.role !== 'employee') {
+        throw new ForbiddenException('Vous ne pouvez inviter que des employés');
+      }
+      if (!dto.siteId) {
+        throw new ForbiddenException('Choisissez un de vos magasins pour cet employé');
+      }
+      await this.siteScope.ensureSite(user, dto.siteId);
+    }
     return this.usersService.invite(user.companyId, dto, user.role);
   }
 
   @Patch(':id/role')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  updateRole(
+  async updateRole(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: UpdateUserRoleDto,
   ) {
+    // Promouvoir quelqu'un en manager lui donnerait tous les magasins : un
+    // manager limité ne touche pas aux rôles.
+    await this.siteScope.ensureAllSites(user);
     return this.usersService.updateRole(user.companyId, id, dto, user.role);
   }
 
   @Patch(':id/status')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  updateStatus(
+  async updateStatus(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: UpdateUserStatusDto,
   ) {
+    await this.siteScope.ensureUser(user, id);
     return this.usersService.updateStatus(user.companyId, id, dto, user.role);
   }
 
   @Post(':id/badge/regenerate')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  regenerateBadge(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+  async regenerateBadge(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    await this.siteScope.ensureUser(user, id);
     return this.usersService.regenerateBadge(user.companyId, id);
   }
 
   @Post(':id/pin')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  setPin(
+  async setPin(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: SetPinDto,
   ) {
+    await this.siteScope.ensureUser(user, id);
     return this.usersService.setPin(user.companyId, id, dto);
   }
 
   @Patch(':id/settings')
   @UseGuards(RolesGuard)
   @Roles('admin', 'manager')
-  updateSettings(
+  async updateSettings(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
     @Body() dto: UpdateUserSettingsDto,
   ) {
+    await this.siteScope.ensureUser(user, id);
+    if (dto.siteId) await this.siteScope.ensureSite(user, dto.siteId);
     return this.usersService.updateSettings(user.companyId, id, dto);
+  }
+
+  // Magasins gérés par un manager (décision #36) — admin uniquement.
+  @Patch(':id/managed-sites')
+  @UseGuards(RolesGuard)
+  @Roles('admin')
+  setManagedSites(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: SetManagedSitesDto) {
+    return this.usersService.setManagedSites(user.companyId, id, dto.siteIds);
   }
 }

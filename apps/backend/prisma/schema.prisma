@@ -103,8 +103,22 @@ model Site {
   shifts      Shift[]
   timeEntries TimeEntry[]
   employees   User[]
+  managers    ManagedSite[]
 
   @@map("sites")
+}
+
+// Magasins gérés par un manager (décision #36) — aucune ligne = le manager
+// gère tous les magasins de l'entreprise. Ignoré pour un admin (toujours
+// tout) et un employé. Supprimé avec le site ou l'utilisateur.
+model ManagedSite {
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  siteId String @map("site_id")
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@id([userId, siteId])
+  @@map("managed_sites")
 }
 
 model User {
@@ -149,6 +163,7 @@ model User {
   shiftAssignments    ShiftAssignment[]
   shiftOfferCandidacies ShiftOfferCandidate[]
   shiftApplications     ShiftApplication[]
+  managedSites          ManagedSite[]
   availabilities      Availability[]
   auditLogs           AuditLog[]
 

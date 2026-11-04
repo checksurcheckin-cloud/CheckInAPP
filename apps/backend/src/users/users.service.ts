@@ -28,6 +28,8 @@ const SAFE_USER_SELECT = {
   gpsClockInEnabled: true,
   mobileClockInEnabled: true,
   siteId: true,
+  // Magasins gérés (managers, décision #36) — vide = tous.
+  managedSites: { select: { siteId: true } },
   createdAt: true,
 } as const;
 
@@ -141,6 +143,11 @@ export class UsersService implements OnApplicationBootstrap {
     if (target.role === 'admin' && dto.role !== 'admin') {
       await this.ensureNotLastActiveAdmin(companyId, target);
     }
+    // Qui n'est plus manager perd ses magasins gérés : sinon, repromu plus
+    // tard, il retrouverait un ancien périmètre oublié (décision #36).
+    if (dto.role !== 'manager') {
+      await this.prisma.managedSite.deleteMany({ where: { userId: id } });
+    }
     return this.prisma.user.update({
       where: { id },
       data: { role: dto.role },
@@ -179,6 +186,29 @@ export class UsersService implements OnApplicationBootstrap {
   // Surcharge individuelle du réglage GPS de l'entreprise, et/ou site de
   // rattachement. `null` explicite sur l'un ou l'autre champ le remet à
   // vide (réglage entreprise par défaut / aucun site) ; un champ absent du
+  // Remplace les magasins gérés par un manager (décision #36) — [] = tous.
+  // Admin uniquement (contrôleur) ; chaque site revalidé dans l'entreprise.
+  async setManagedSites(companyId: string, id: string, siteIds: string[]) {
+    const target = await this.findOne(companyId, id);
+    if (target.role !== 'manager') {
+      throw new ConflictException('Seul un manager a des magasins gérés');
+    }
+    const unique = [...new Set(siteIds)];
+    if (unique.length > 0) {
+      const count = await this.prisma.site.count({ where: { id: { in: unique }, companyId } });
+      if (count !== unique.length) {
+        throw new NotFoundException('Site introuvable');
+      }
+    }
+    await this.prisma.$transaction([
+      this.prisma.managedSite.deleteMany({ where: { userId: id } }),
+      ...(unique.length > 0
+        ? [this.prisma.managedSite.createMany({ data: unique.map((siteId) => ({ userId: id, siteId })) })]
+        : []),
+    ]);
+    return this.findOne(companyId, id);
+  }
+
   // Réglages de pointage résolus de l'appelant — checkin-mobile s'en sert
   // pour afficher ou non l'onglet Pointage et le GPS (décision #35).
   async getClockInSettings(companyId: string, userId: string) {

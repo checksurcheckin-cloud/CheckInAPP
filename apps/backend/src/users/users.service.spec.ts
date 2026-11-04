@@ -22,6 +22,7 @@ describe('UsersService', () => {
     };
     site: {
       findFirst: jest.Mock;
+      count: jest.Mock;
     };
     shiftAssignment: {
       updateMany: jest.Mock;
@@ -29,6 +30,8 @@ describe('UsersService', () => {
     shiftApplication: {
       deleteMany: jest.Mock;
     };
+    managedSite: { deleteMany: jest.Mock; createMany: jest.Mock };
+    $transaction: jest.Mock;
   };
 
   beforeEach(async () => {
@@ -43,6 +46,7 @@ describe('UsersService', () => {
       },
       site: {
         findFirst: jest.fn(),
+        count: jest.fn(),
       },
       shiftAssignment: {
         updateMany: jest.fn(),
@@ -50,6 +54,8 @@ describe('UsersService', () => {
       shiftApplication: {
         deleteMany: jest.fn(),
       },
+      managedSite: { deleteMany: jest.fn(), createMany: jest.fn() },
+      $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
     realtime = { emitToCompany: jest.fn() };
 
@@ -250,6 +256,32 @@ describe('UsersService', () => {
     expect(prisma.user.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'user-1', companyId: 'company-a' } }),
     );
+  });
+
+  it('replaces the managed sites of a manager after checking every site belongs to the company (décision #36)', async () => {
+    prisma.user.findFirst.mockResolvedValue({ id: 'manager-2', companyId: 'company-a', role: 'manager' });
+    prisma.site.count.mockResolvedValue(2);
+
+    await service.setManagedSites('company-a', 'manager-2', ['ixelles', 'bruxelles', 'ixelles']);
+
+    expect(prisma.site.count).toHaveBeenCalledWith({ where: { id: { in: ['ixelles', 'bruxelles'] }, companyId: 'company-a' } });
+    expect(prisma.managedSite.deleteMany).toHaveBeenCalledWith({ where: { userId: 'manager-2' } });
+    expect(prisma.managedSite.createMany).toHaveBeenCalledWith({
+      data: [
+        { userId: 'manager-2', siteId: 'ixelles' },
+        { userId: 'manager-2', siteId: 'bruxelles' },
+      ],
+    });
+  });
+
+  it('refuses managed sites from another company or for a non-manager', async () => {
+    prisma.user.findFirst.mockResolvedValueOnce({ id: 'manager-2', companyId: 'company-a', role: 'manager' });
+    prisma.site.count.mockResolvedValue(1);
+    await expect(service.setManagedSites('company-a', 'manager-2', ['ixelles', 'site-of-b'])).rejects.toThrow(NotFoundException);
+
+    prisma.user.findFirst.mockResolvedValueOnce({ id: 'emp-1', companyId: 'company-a', role: 'employee' });
+    await expect(service.setManagedSites('company-a', 'emp-1', [])).rejects.toThrow(ConflictException);
+    expect(prisma.managedSite.createMany).not.toHaveBeenCalled();
   });
 
   it('rejects invite() when the email is already used, even across companies', async () => {

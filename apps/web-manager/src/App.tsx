@@ -57,8 +57,14 @@ function RootRoutes() {
         <Route path="/presence" element={<PresenceLivePage />} />
         <Route path="/approvals" element={<ShiftApprovalPage />} />
         <Route path="/team" element={<TeamPage />} />
-        <Route path="/sites" element={<SitesPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        {/* Admin uniquement (décision #37) — un manager qui tape l'URL
+            retombe sur le planning. */}
+        {user.role === 'admin' ? (
+          <>
+            <Route path="/sites" element={<SitesPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+          </>
+        ) : null}
         <Route path="*" element={<Navigate to="/planning" replace />} />
       </Routes>
     </AppShell>

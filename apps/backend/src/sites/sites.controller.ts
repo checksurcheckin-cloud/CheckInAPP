@@ -43,21 +43,19 @@ export class SitesController {
     return this.sitesService.findOne(user.companyId, id);
   }
 
+  // Créer/modifier un site : admin uniquement (décision #37), comme la
+  // suppression.
   @Post()
   @UseGuards(RolesGuard)
-  @Roles('admin', 'manager')
-  async create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSiteDto) {
-    // Un manager limité à certains magasins ne crée pas de nouveau site
-    // (il n'en ferait de toute façon pas partie) — décision #36.
-    await this.siteScope.ensureAllSites(user);
+  @Roles('admin')
+  create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateSiteDto) {
     return this.sitesService.create(user.companyId, dto);
   }
 
   @Patch(':id')
   @UseGuards(RolesGuard)
-  @Roles('admin', 'manager')
-  async update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateSiteDto) {
-    await this.siteScope.ensureSite(user, id);
+  @Roles('admin')
+  update(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: UpdateSiteDto) {
     return this.sitesService.update(user.companyId, id, dto);
   }
 

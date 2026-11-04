@@ -30,8 +30,10 @@ const NAV_ITEMS = [
   { to: '/presence', label: 'Présence', icon: Radio },
   { to: '/approvals', label: 'Échanges', icon: ArrowLeftRight },
   { to: '/team', label: 'Équipe', icon: Users },
-  { to: '/sites', label: 'Sites', icon: MapPin },
-  { to: '/settings', label: 'Réglages', icon: Settings },
+  // Réservés à l'admin (décision #37) : un manager ne crée ni ne modifie de
+  // site, et ne touche pas aux réglages de l'entreprise.
+  { to: '/sites', label: 'Sites', icon: MapPin, adminOnly: true },
+  { to: '/settings', label: 'Réglages', icon: Settings, adminOnly: true },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -71,7 +73,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )}
         </div>
         <nav className="app-sidebar-nav" style={styles.nav}>
-          {NAV_ITEMS.map((item) => (
+          {NAV_ITEMS.filter((item) => !item.adminOnly || user?.role === 'admin').map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

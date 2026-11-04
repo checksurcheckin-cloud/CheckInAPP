@@ -280,8 +280,8 @@ export class ApiClient {
   }
 
   // ---- Pointage (checkin-mobile — l'employé pointe pour lui-même) ----
-  // Sans siteId, le backend déduit le site (le plus proche de la position,
-  // sinon le site de rattachement) — l'app mobile ne fait plus choisir.
+  // Sans siteId, le backend déduit le site (dernier pointage, shift en cours,
+  // site de rattachement, puis site le plus proche) — plus de choix à faire.
   clockInWithGps(type: string, geoLat: number, geoLng: number, siteId?: string) {
     return this.request<TimeEntry>('POST', '/time-entries/self', {
       source: 'gps',

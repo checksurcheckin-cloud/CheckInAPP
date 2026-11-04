@@ -122,7 +122,7 @@ export class TimeEntriesService {
       }
       siteId = site.id;
     } else {
-      siteId = await this.resolveGpsSite(user, dto.geoLat as number, dto.geoLng as number);
+      siteId = await this.resolveGpsSite(user, dto.type, dto.geoLat as number, dto.geoLng as number);
     }
 
     const entry = await this.prisma.timeEntry.create({
@@ -142,10 +142,48 @@ export class TimeEntriesService {
     return entry;
   }
 
-  // Site d'un pointage GPS sans site choisi : le site (avec coordonnées) le
-  // plus proche de la position — là où l'employé se trouve réellement — sinon
-  // son site de rattachement, sinon l'unique site de l'entreprise.
-  private async resolveGpsSite(user: AuthenticatedUser, geoLat: number, geoLng: number): Promise<string> {
+  // Site d'un pointage GPS sans site choisi, du plus fiable au moins fiable :
+  // 1. pause/départ : le site du dernier pointage (on termine là où on a
+  //    commencé) ; 2. le shift de l'employé en cours ou qui commence dans
+  //    les 2 h ; 3. son site de rattachement ; 4. le site géolocalisé le plus
+  //    proche de sa position ; 5. l'unique site de l'entreprise.
+  private async resolveGpsSite(
+    user: AuthenticatedUser,
+    type: TimeEntryType,
+    geoLat: number,
+    geoLng: number,
+  ): Promise<string> {
+    const now = new Date();
+    if (type !== 'clock_in') {
+      const last = await this.prisma.timeEntry.findFirst({
+        where: { userId: user.userId, site: { companyId: user.companyId } },
+        orderBy: { timestamp: 'desc' },
+        select: { siteId: true },
+      });
+      if (last) return last.siteId;
+    }
+
+    const assignment = await this.prisma.shiftAssignment.findFirst({
+      where: {
+        userId: user.userId,
+        status: { not: 'cancelled' },
+        shift: {
+          site: { companyId: user.companyId },
+          startsAt: { lte: new Date(now.getTime() + 2 * 3600000) },
+          endsAt: { gte: now },
+        },
+      },
+      orderBy: { shift: { startsAt: 'asc' } },
+      select: { shift: { select: { siteId: true } } },
+    });
+    if (assignment) return assignment.shift.siteId;
+
+    const requester = await this.prisma.user.findFirst({
+      where: { id: user.userId, companyId: user.companyId },
+      select: { siteId: true },
+    });
+    if (requester?.siteId) return requester.siteId;
+
     const sites = await this.prisma.site.findMany({
       where: { companyId: user.companyId },
       select: { id: true, geoLat: true, geoLng: true },
@@ -157,11 +195,6 @@ export class TimeEntriesService {
     if (located.length > 0) {
       return located.reduce((best, s) => (s.distance < best.distance ? s : best)).id;
     }
-    const requester = await this.prisma.user.findFirst({
-      where: { id: user.userId, companyId: user.companyId },
-      select: { siteId: true },
-    });
-    if (requester?.siteId) return requester.siteId;
     if (sites.length === 1) return sites[0].id;
     throw new BadRequestException('Impossible de déterminer le site de ce pointage');
   }

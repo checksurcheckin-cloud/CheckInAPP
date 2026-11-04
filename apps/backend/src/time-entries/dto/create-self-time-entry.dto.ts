@@ -14,8 +14,9 @@ export class CreateSelfTimeEntryDto {
   @IsIn(['gps', 'qr_scan_own_phone'])
   source: 'gps' | 'qr_scan_own_phone';
 
-  // Optionnel : sans siteId, le backend déduit le site (le plus proche de
-  // la position, sinon le site de rattachement de l'employé) — l'app mobile
+  // Optionnel : sans siteId, le backend déduit le site (dernier pointage,
+  // shift en cours, site de rattachement, puis site le plus proche — voir
+  // TimeEntriesService.resolveGpsSite) — l'app mobile
   // ne demande plus de choisir un site. Encore accepté pour les anciennes
   // versions de l'app.
   @ValidateIf((o) => o.source === 'gps' && o.siteId !== undefined)

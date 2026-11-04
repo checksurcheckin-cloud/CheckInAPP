@@ -13,6 +13,7 @@ describe('TimeEntriesService', () => {
     site: { findFirst: jest.Mock; findMany: jest.Mock };
     siteDevice: { findFirst: jest.Mock };
     timeEntry: { create: jest.Mock; findMany: jest.Mock; findFirst: jest.Mock; update: jest.Mock };
+    shiftAssignment: { findFirst: jest.Mock };
   };
   let usersService: { resolveByPin: jest.Mock; verifyPin: jest.Mock };
   let rotatingQrService: { decodePayload: jest.Mock; verifyCode: jest.Mock };
@@ -29,6 +30,7 @@ describe('TimeEntriesService', () => {
         findFirst: jest.fn(),
         update: jest.fn(),
       },
+      shiftAssignment: { findFirst: jest.fn().mockResolvedValue(null) },
     };
     usersService = { resolveByPin: jest.fn(), verifyPin: jest.fn() };
     rotatingQrService = { decodePayload: jest.fn(), verifyCode: jest.fn() };
@@ -246,38 +248,50 @@ describe('TimeEntriesService', () => {
       expect(prisma.timeEntry.create).toHaveBeenCalled();
     });
 
-    it('picks the nearest located site when a gps entry has no siteId', async () => {
+    const gpsNoSite = { source: 'gps' as const, geoLat: 50.85, geoLng: 4.35 };
+
+    it('ends a break/shift on the site of the last clock entry when no siteId is given', async () => {
+      prisma.timeEntry.findFirst.mockResolvedValue({ siteId: 'site-started-here' });
+      prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
+
+      await service.createSelf(user, { type: 'clock_out' as any, ...gpsNoSite });
+
+      expect(prisma.timeEntry.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ siteId: 'site-started-here' }),
+      });
+    });
+
+    it("clocks in on the site of the employee's current/upcoming shift before their home site", async () => {
+      prisma.shiftAssignment.findFirst.mockResolvedValue({ shift: { siteId: 'site-of-shift' } });
+      prisma.user.findFirst.mockResolvedValue({ siteId: 'home-site' });
+      prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
+
+      await service.createSelf(user, { type: 'clock_in' as any, ...gpsNoSite });
+
+      expect(prisma.shiftAssignment.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ userId: user.userId, shift: expect.objectContaining({ site: { companyId: 'company-a' } }) }),
+        }),
+      );
+      expect(prisma.timeEntry.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ siteId: 'site-of-shift' }),
+      });
+    });
+
+    it('uses the home site, then the nearest located site, when there is no shift', async () => {
+      prisma.user.findFirst.mockResolvedValueOnce({ siteId: 'home-site' });
+      prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
+      await service.createSelf(user, { type: 'clock_in' as any, ...gpsNoSite });
+      expect(prisma.timeEntry.create).toHaveBeenLastCalledWith({ data: expect.objectContaining({ siteId: 'home-site' }) });
+
+      prisma.user.findFirst.mockResolvedValueOnce({ siteId: null });
       prisma.site.findMany.mockResolvedValue([
         { id: 'site-far', geoLat: '50.5', geoLng: '4.0' },
         { id: 'site-near', geoLat: '50.8501', geoLng: '4.3501' },
         { id: 'site-unlocated', geoLat: null, geoLng: null },
       ]);
-      prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
-
-      await service.createSelf(user, { type: 'clock_in' as any, source: 'gps', geoLat: 50.85, geoLng: 4.35 });
-
-      expect(prisma.site.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { companyId: 'company-a' } }));
-      expect(prisma.timeEntry.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ siteId: 'site-near', source: 'gps' }),
-      });
-    });
-
-    it("falls back to the employee's own site when no site has coordinates", async () => {
-      prisma.site.findMany.mockResolvedValue([
-        { id: 'site-a', geoLat: null, geoLng: null },
-        { id: 'site-b', geoLat: null, geoLng: null },
-      ]);
-      prisma.user.findFirst.mockResolvedValue({ siteId: 'site-b' });
-      prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
-
-      await service.createSelf(user, { type: 'clock_in' as any, source: 'gps', geoLat: 50.85, geoLng: 4.35 });
-
-      expect(prisma.user.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: user.userId, companyId: 'company-a' } }),
-      );
-      expect(prisma.timeEntry.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ siteId: 'site-b' }),
-      });
+      await service.createSelf(user, { type: 'clock_in' as any, ...gpsNoSite });
+      expect(prisma.timeEntry.create).toHaveBeenLastCalledWith({ data: expect.objectContaining({ siteId: 'site-near' }) });
     });
 
     it('blocks a gps entry when the user has an explicit override disabling it', async () => {

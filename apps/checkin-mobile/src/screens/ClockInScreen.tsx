@@ -72,8 +72,8 @@ export function ClockInScreen() {
         throw new Error('Autorisation de localisation refusée');
       }
       const position = await Location.getCurrentPositionAsync({});
-      // Pas de choix de site : le backend retient le site le plus proche de
-      // la position (sinon le site de rattachement de l'employé).
+      // Pas de choix de site : le backend le déduit (dernier pointage, shift
+      // en cours, site de rattachement, puis site le plus proche).
       const entry: TimeEntry = await apiClient.clockInWithGps(
         selectedType,
         position.coords.latitude,

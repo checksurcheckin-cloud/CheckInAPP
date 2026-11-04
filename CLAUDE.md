@@ -149,10 +149,14 @@ Cible : PME de 20-100 employés par site.
    `TimeEntriesService.createSelf` avant d'accepter un pointage `source: gps` ;
    sinon 403.
    L'employé ne choisit plus le site d'un pointage GPS (sélecteur retiré de
-   checkin-mobile) : sans `siteId`, `createSelf` retient le site **avec
-   coordonnées le plus proche de la position** envoyée (haversine), sinon le
-   site de rattachement de l'employé (`User.siteId`), sinon l'unique site de
-   l'entreprise, sinon 400. Un `siteId` explicite reste accepté (anciennes
+   checkin-mobile) : sans `siteId`, `createSelf` le déduit
+   (`resolveGpsSite`), du plus fiable au moins fiable : (1) pause/départ =
+   site du dernier pointage ; (2) site du shift de l'employé en cours ou qui
+   commence dans les 2 h ; (3) son site de rattachement (`User.siteId`) ;
+   (4) le site géolocalisé le plus proche de sa position (haversine) ; (5)
+   l'unique site de l'entreprise ; sinon 400. La proximité n'arrive qu'en 4e
+   car beaucoup de sites n'ont pas de coordonnées (en prod, un seul sur
+   trois) : en premier, elle aurait tout attribué à ce seul site. Un `siteId` explicite reste accepté (anciennes
    versions de l'app) et toujours revalidé dans l'entreprise.
 
 10. **Géocodage via Nominatim/OpenStreetMap (pas de clé API), réservé

@@ -148,6 +148,12 @@ Cible : PME de 20-100 employés par site.
    résolu (override employé ?? défaut entreprise) doit être vérifié par
    `TimeEntriesService.createSelf` avant d'accepter un pointage `source: gps` ;
    sinon 403.
+   L'employé ne choisit plus le site d'un pointage GPS (sélecteur retiré de
+   checkin-mobile) : sans `siteId`, `createSelf` retient le site **avec
+   coordonnées le plus proche de la position** envoyée (haversine), sinon le
+   site de rattachement de l'employé (`User.siteId`), sinon l'unique site de
+   l'entreprise, sinon 400. Un `siteId` explicite reste accepté (anciennes
+   versions de l'app) et toujours revalidé dans l'entreprise.
 
 10. **Géocodage via Nominatim/OpenStreetMap (pas de clé API), réservé
     admin/manager.** `/geocoding/search` (adresse → coordonnées, utilisé à la

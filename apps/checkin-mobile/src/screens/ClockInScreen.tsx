@@ -5,9 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { colors, spacing, radius, typography, nativeShadow } from '@horaires/ui-tokens';
 import { fonts } from '../theme';
-import type { Site, TimeEntry, TimeEntryType } from '@horaires/shared-types';
+import type { TimeEntry, TimeEntryType } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
-import { SitePicker } from '../components/SitePicker';
 import { ConfirmationBanner } from '../components/ConfirmationBanner';
 import { PersonalQrCode } from '../components/PersonalQrCode';
 import { PinFallbackNotice } from '../components/PinFallbackNotice';
@@ -40,8 +39,6 @@ export function ClockInScreen() {
   const clockInSettings = useClockInSettings();
   const qrEnabled = clockInSettings?.mobileClockInEnabled ?? true;
   const gpsEnabled = clockInSettings?.gpsClockInEnabled ?? false;
-  const [sites, setSites] = useState<Site[]>([]);
-  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [lastEntry, setLastEntry] = useState<TimeEntry | null>(null);
   const [selectedType, setSelectedType] = useState<TimeEntryType | null>(null);
   const [showOtherMethods, setShowOtherMethods] = useState(false);
@@ -52,12 +49,7 @@ export function ClockInScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const [siteList, entries] = await Promise.all([
-        apiClient.getSites(),
-        apiClient.getMyTimeEntries(),
-      ]);
-      setSites(siteList);
-      setSelectedSiteId((current) => current ?? siteList[0]?.id ?? null);
+      const entries = await apiClient.getMyTimeEntries();
       setLastEntry(entries[0] ?? null);
     } catch {
       // Silencieux — l'écran reste utilisable, juste sans statut affiché.
@@ -71,7 +63,7 @@ export function ClockInScreen() {
   );
 
   const submit = async () => {
-    if (!selectedType || !selectedSiteId) return;
+    if (!selectedType) return;
     setIsSubmitting(true);
     setBanner(null);
     try {
@@ -80,8 +72,9 @@ export function ClockInScreen() {
         throw new Error('Autorisation de localisation refusée');
       }
       const position = await Location.getCurrentPositionAsync({});
+      // Pas de choix de site : le backend retient le site le plus proche de
+      // la position (sinon le site de rattachement de l'employé).
       const entry: TimeEntry = await apiClient.clockInWithGps(
-        selectedSiteId,
         selectedType,
         position.coords.latitude,
         position.coords.longitude,
@@ -143,7 +136,7 @@ export function ClockInScreen() {
             </View>
           </View>
           <Text style={styles.gpsOnlyTitle}>Pointer par GPS</Text>
-          <Text style={styles.gpsOnlyCaption}>Choisissez le site et l'action, votre position confirme le pointage</Text>
+          <Text style={styles.gpsOnlyCaption}>Choisissez l'action, votre position confirme le pointage</Text>
         </View>
       )}
 
@@ -175,7 +168,6 @@ export function ClockInScreen() {
             </Text>
           ) : null}
 
-          <SitePicker sites={sites} selectedSiteId={selectedSiteId} onSelect={setSelectedSiteId} />
 
           <View style={styles.actions}>
             {ACTIONS.map((action) => (

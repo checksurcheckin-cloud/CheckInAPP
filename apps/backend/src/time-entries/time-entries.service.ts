@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { TimeEntrySource, TimeEntryType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
@@ -113,7 +113,7 @@ export class TimeEntriesService {
       }
       siteId = device.siteId;
       deviceId = device.id;
-    } else {
+    } else if (dto.siteId) {
       const site = await this.prisma.site.findFirst({
         where: { id: dto.siteId, companyId: user.companyId },
       });
@@ -121,6 +121,8 @@ export class TimeEntriesService {
         throw new NotFoundException('Site introuvable');
       }
       siteId = site.id;
+    } else {
+      siteId = await this.resolveGpsSite(user, dto.geoLat as number, dto.geoLng as number);
     }
 
     const entry = await this.prisma.timeEntry.create({
@@ -138,6 +140,30 @@ export class TimeEntriesService {
 
     this.realtime.emitToCompany(user.companyId, 'time-entries:changed');
     return entry;
+  }
+
+  // Site d'un pointage GPS sans site choisi : le site (avec coordonnées) le
+  // plus proche de la position — là où l'employé se trouve réellement — sinon
+  // son site de rattachement, sinon l'unique site de l'entreprise.
+  private async resolveGpsSite(user: AuthenticatedUser, geoLat: number, geoLng: number): Promise<string> {
+    const sites = await this.prisma.site.findMany({
+      where: { companyId: user.companyId },
+      select: { id: true, geoLat: true, geoLng: true },
+    });
+    // geoLat/geoLng sont des Decimal Prisma : convertis avant le calcul.
+    const located = sites
+      .filter((s) => s.geoLat != null && s.geoLng != null)
+      .map((s) => ({ id: s.id, distance: haversineDistanceMeters(geoLat, geoLng, Number(s.geoLat), Number(s.geoLng)) }));
+    if (located.length > 0) {
+      return located.reduce((best, s) => (s.distance < best.distance ? s : best)).id;
+    }
+    const requester = await this.prisma.user.findFirst({
+      where: { id: user.userId, companyId: user.companyId },
+      select: { siteId: true },
+    });
+    if (requester?.siteId) return requester.siteId;
+    if (sites.length === 1) return sites[0].id;
+    throw new BadRequestException('Impossible de déterminer le site de ce pointage');
   }
 
   async createManual(manager: AuthenticatedUser, dto: CreateManualTimeEntryDto) {

@@ -10,6 +10,7 @@ import { CreateShiftDto } from './dto/create-shift.dto';
 import { UpdateShiftDto } from './dto/update-shift.dto';
 import { AssignShiftDto } from './dto/assign-shift.dto';
 import { ApproveShiftOfferDto } from './dto/approve-shift-offer.dto';
+import { ProposeShiftOnMarketDto } from './dto/propose-shift-on-market.dto';
 import { FindShiftsQueryDto } from './dto/find-shifts-query.dto';
 
 @ApiTags('shifts')
@@ -90,6 +91,15 @@ export class ShiftsController {
   @Roles('admin', 'manager')
   approveOpenShift(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ApproveShiftOfferDto) {
     return this.shiftsService.approveOpenShift(user.companyId, id, dto);
+  }
+
+  // Choisit le public d'un créneau libre sur le marché (tous les sites,
+  // certains sites, certains employés) — publie le shift s'il était brouillon.
+  @Post('shifts/:id/market')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'manager')
+  proposeOnMarket(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string, @Body() dto: ProposeShiftOnMarketDto) {
+    return this.shiftsService.proposeOnMarket(user.companyId, id, dto);
   }
 
   // Refuse toutes les candidatures ; le créneau reste libre sur le marché.

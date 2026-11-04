@@ -803,6 +803,35 @@ Cible : PME de 20-100 employés par site.
       `lib/date.ts`). checkin-mobile : « Mes échanges » ne propose plus un
       shift terminé.
 
+33. **Le manager choisit à qui un créneau libre est proposé sur le marché :
+    son magasin (défaut), tous les sites, des sites précis ou des employés
+    précis.** Sur la ligne « Shifts disponibles », la liste déroulante
+    « + Assigner… » de `ShiftCard` est remplacée par un bouton
+    « Proposer » / « Marché : <public> » qui ouvre `MarketProposalDialog`
+    (l'assignation directe reste le glisser-déposer sur la ligne d'un
+    employé — les décisions #16/#17 ne concernent donc plus que la dépose,
+    le sélecteur qu'elles décrivaient n'existe plus).
+    - Stockage sur `Shift` : `marketScope` (`site` | `all_sites` | `sites` |
+      `employees`, défaut `site`), `marketSiteIds`, `marketUserIds`
+      (tableaux Postgres, sans FK — revalidés dans l'entreprise à
+      l'écriture, règle #1). `POST /shifts/:id/market` (admin/manager,
+      `ProposeShiftOnMarketDto`, `ShiftsService.proposeOnMarket`).
+    - **Choix produit : l'apparition automatique reste** (décision #30) —
+      un shift publié sans titulaire est toujours sur le marché de son
+      magasin (`site`) sans rien faire ; la proposition sert à élargir ou
+      restreindre ce public. Proposer un **brouillon le publie** dans le
+      même geste (sinon personne ne le verrait).
+    - Règle de visibilité en deux versions qui doivent rester identiques :
+      `marketAudienceWhere` (filtre Prisma de `listOpenOffers`) et
+      `isInMarketAudience` (contrôle de `applyToOpenShift`, 403). Un employé
+      sans site voit les portées `site` et `sites` de tous les sites
+      (cohérent avec décision #25) ; `employees` ne montre le créneau qu'aux
+      personnes choisies, quel que soit leur site.
+    - Changer le public efface les candidatures des personnes qui n'en font
+      plus partie. Refusé (409) sur un shift déjà pourvu ou terminé
+      (décision #32). Émet `shifts:changed`. Les échanges (`kind: 'swap'`)
+      ne sont pas concernés.
+
 ## Stack
 
 - Backend : NestJS + PostgreSQL + Prisma + Passport/JWT

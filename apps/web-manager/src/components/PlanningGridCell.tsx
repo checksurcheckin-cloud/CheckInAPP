@@ -2,7 +2,7 @@ import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { Ban } from 'lucide-react';
 import { colors, spacing, radius, typography } from '@horaires/ui-tokens';
-import type { Availability, Shift, User } from '@horaires/shared-types';
+import type { Availability, Shift } from '@horaires/shared-types';
 import { addDays, combineDateAndTime, durationMinutesFromTimeRange, fractionOfDay, isEnded } from '../lib/date';
 import { isEmployeeAvailableForShift, type UnavailabilityInfo } from '../lib/availability';
 import { ShiftCard } from './ShiftCard';
@@ -11,19 +11,13 @@ type Props = {
   date: Date;
   employeeId: string | null; // null = ligne "Shifts disponibles" (pool non assigné)
   shifts: Shift[];
-  // Tous les shifts de ce jour (assignés ou non, n'importe quel employé) —
-  // sert uniquement à filtrer le sélecteur d'assignation des cartes de cette
-  // cellule (voir ShiftCard : un employé déjà occupé ce jour-là n'y apparaît
-  // pas), sans rapport avec `shifts` qui ne contient que le contenu affiché.
-  dayShifts: Shift[];
-  employees: User[];
   availabilities: Availability[];
   // Résolu par PlanningPage (lib/shiftColor.ts, resolveShiftColors) — un
   // shift garde toujours la même couleur, jamais recalculée ici.
   getShiftPalette: (shiftId: string) => { bg: string; text: string };
   onDeleteShift: (id: string) => void;
   onDuplicateShift: (shift: Shift) => void;
-  onAssign: (shiftId: string, userId: string) => void;
+  onProposeOnMarket: (shift: Shift) => void;
   onEditShift: (shift: Shift) => void;
   onPublishShift: (shiftId: string) => void;
   busyId: string | null;
@@ -51,13 +45,11 @@ export function PlanningGridCell({
   date,
   employeeId,
   shifts,
-  dayShifts,
-  employees,
   availabilities,
   getShiftPalette,
   onDeleteShift,
   onDuplicateShift,
-  onAssign,
+  onProposeOnMarket,
   onEditShift,
   onPublishShift,
   busyId,
@@ -137,12 +129,9 @@ export function PlanningGridCell({
           key={shift.id}
           shift={shift}
           palette={getShiftPalette(shift.id)}
-          employees={employees}
-          availabilities={availabilities}
-          dayShifts={dayShifts}
           onDelete={onDeleteShift}
           onDuplicate={onDuplicateShift}
-          onAssign={onAssign}
+          onProposeOnMarket={onProposeOnMarket}
           onEdit={onEditShift}
           onPublish={onPublishShift}
           busy={busyId === shift.id}

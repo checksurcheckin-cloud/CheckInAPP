@@ -5,6 +5,16 @@
 export type UserRole = 'admin' | 'manager' | 'employee';
 export type UserStatus = 'active' | 'invited' | 'disabled';
 export type ShiftStatus = 'draft' | 'published' | 'cancelled';
+
+// Public d'un créneau libre sur le marché : 'site' = employés du magasin du
+// shift (défaut), sinon choisi par le manager.
+export type MarketScope = 'site' | 'all_sites' | 'sites' | 'employees';
+
+export interface ProposeShiftOnMarketPayload {
+  scope: MarketScope;
+  siteIds?: string[]; // requis pour 'sites'
+  userIds?: string[]; // requis pour 'employees'
+}
 export type AssignmentStatus =
   | 'assigned'
   | 'offered'
@@ -75,6 +85,9 @@ export interface Shift {
   endsAt: string;
   roleNeeded?: string;
   status: ShiftStatus;
+  marketScope?: MarketScope;
+  marketSiteIds?: string[];
+  marketUserIds?: string[];
   assignments?: ShiftAssignment[];
 }
 

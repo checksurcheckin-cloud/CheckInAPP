@@ -10,7 +10,7 @@ import {
 } from '@dnd-kit/core';
 import { ChevronLeft, ChevronRight, Plus, Send } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows, shiftPalette } from '@horaires/ui-tokens';
-import type { Availability, Shift, Site, User } from '@horaires/shared-types';
+import type { Availability, ProposeShiftOnMarketPayload, Shift, Site, User } from '@horaires/shared-types';
 import { ApiError } from '@horaires/api-client';
 import { apiClient, useAuth } from '../services/AuthService';
 import { SiteSelect } from '../components/SiteSelect';
@@ -20,6 +20,7 @@ import { ShiftTemplateCard } from '../components/ShiftTemplateCard';
 import { Dialog } from '../components/Dialog';
 import { MonthCalendar } from '../components/MonthCalendar';
 import { EditShiftDialog } from '../components/EditShiftDialog';
+import { MarketProposalDialog } from '../components/MarketProposalDialog';
 import {
   startOfWeek,
   addDays,
@@ -79,6 +80,7 @@ export function PlanningPage() {
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
+  const [marketTarget, setMarketTarget] = useState<Shift | null>(null);
   const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
 
@@ -237,22 +239,11 @@ export function PlanningPage() {
     await load({ silent: true });
   };
 
-  const assignEmployee = async (shiftId: string, userId: string) => {
-    setBusyId(shiftId);
-    try {
-      await apiClient.assignShift(shiftId, userId);
-      await load({ silent: true });
-    } catch (err) {
-      // Le backend refuse un employé déjà sur un shift qui chevauche celui-ci
-      // dans le temps (409), ou une assignation en dehors de sa disponibilité
-      // déclarée — même message affiché, qu'on arrive ici par glisser-déposer
-      // ou via le menu déroulant de secours sur la carte.
-      setConflictMessage(
-        err instanceof ApiError ? err.message : "Impossible d'assigner cet employé à ce shift",
-      );
-    } finally {
-      setBusyId(null);
-    }
+  // Public d'un créneau libre sur le marché (décision #33) — l'erreur
+  // éventuelle s'affiche dans le dialog, qui reste ouvert.
+  const proposeOnMarket = async (shiftId: string, payload: ProposeShiftOnMarketPayload) => {
+    await apiClient.proposeShiftOnMarket(shiftId, payload);
+    await load({ silent: true });
   };
 
   // Dépose d'un shift existant sur une cellule (employé x jour) : déplace le
@@ -643,13 +634,11 @@ export function PlanningPage() {
                   employeeId={null}
                   mint
                   shifts={shiftsForDay(date).filter((s) => (s.assignments ?? []).length === 0)}
-                  dayShifts={shiftsForDay(date)}
-                  employees={employees}
                   availabilities={availabilities}
                   getShiftPalette={getShiftPalette}
                   onDeleteShift={deleteShift}
                   onDuplicateShift={duplicateShift}
-                  onAssign={assignEmployee}
+                  onProposeOnMarket={setMarketTarget}
                   onEditShift={setEditingShift}
                   onPublishShift={publishShift}
                   busyId={busyId}
@@ -668,13 +657,11 @@ export function PlanningPage() {
                       date={date}
                       employeeId={user.id}
                       shifts={shiftsForDay(date).filter((s) => (s.assignments ?? []).some((a) => a.userId === user.id))}
-                      dayShifts={shiftsForDay(date)}
-                      employees={employees}
                       availabilities={availabilities}
                       getShiftPalette={getShiftPalette}
                       onDeleteShift={deleteShift}
                       onDuplicateShift={duplicateShift}
-                      onAssign={assignEmployee}
+                      onProposeOnMarket={setMarketTarget}
                       onEditShift={setEditingShift}
                       onPublishShift={publishShift}
                       busyId={busyId}
@@ -760,6 +747,14 @@ export function PlanningPage() {
         sites={sites}
         onClose={() => setEditingShift(null)}
         onSave={updateShiftDetails}
+      />
+
+      <MarketProposalDialog
+        shift={marketTarget}
+        sites={sites}
+        users={users}
+        onClose={() => setMarketTarget(null)}
+        onSave={proposeOnMarket}
       />
     </DndContext>
   );

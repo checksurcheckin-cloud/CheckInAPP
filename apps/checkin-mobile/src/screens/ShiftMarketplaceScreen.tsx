@@ -165,7 +165,7 @@ export function ShiftMarketplaceScreen() {
             <View style={[styles.miniAvatar, styles.openSlotIcon]}>
               <Ionicons name="storefront-outline" size={12} color={colors.accent} />
             </View>
-            <Text style={styles.byName}>Créneau libre du magasin</Text>
+            <Text style={styles.byName}>Créneau libre</Text>
           </View>
         ) : null}
 

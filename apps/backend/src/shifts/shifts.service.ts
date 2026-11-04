@@ -7,6 +7,7 @@ import { UpdateShiftDto } from './dto/update-shift.dto';
 import { AssignShiftDto } from './dto/assign-shift.dto';
 import { ApproveShiftOfferDto } from './dto/approve-shift-offer.dto';
 import { FindShiftsQueryDto } from './dto/find-shifts-query.dto';
+import { ProposeShiftOnMarketDto } from './dto/propose-shift-on-market.dto';
 
 @Injectable()
 export class ShiftsService {
@@ -130,7 +131,7 @@ export class ShiftsService {
       select: { siteId: true },
     });
     const openShifts = await this.prisma.shift.findMany({
-      where: { ...openShiftWhere(companyId), ...(requester?.siteId ? { siteId: requester.siteId } : {}) },
+      where: { ...openShiftWhere(companyId), ...marketAudienceWhere(requesterId, requester?.siteId ?? null) },
       include: { applications: { where: { userId: requesterId } } },
       orderBy: { startsAt: 'asc' },
     });
@@ -475,14 +476,14 @@ export class ShiftsService {
       throw new NotFoundException("Ce créneau n'est plus disponible");
     }
 
-    // Même règle que le marché affiché (listOpenOffers) : un employé rattaché
-    // à un magasin ne candidate que sur les créneaux de ce magasin.
+    // Même règle que le marché affiché (listOpenOffers) : on ne candidate
+    // que sur un créneau proposé à son public (décision #33).
     const requester = await this.prisma.user.findFirst({
       where: { id: applicant.userId, companyId },
       select: { siteId: true },
     });
-    if (requester?.siteId && requester.siteId !== shift.siteId) {
-      throw new ForbiddenException('Ce créneau concerne un autre magasin');
+    if (!isInMarketAudience(shift, applicant.userId, requester?.siteId ?? null)) {
+      throw new ForbiddenException("Ce créneau n'est pas proposé à votre magasin");
     }
 
     const existing = await this.prisma.shiftApplication.findFirst({
@@ -527,6 +528,60 @@ export class ShiftsService {
     }
     await this.prisma.shiftApplication.deleteMany({ where: { shiftId } });
     this.realtime.emitToCompany(companyId, 'shifts:changed');
+  }
+
+  // Le manager choisit à qui un créneau libre est proposé sur le marché
+  // (décision #33). Proposer un brouillon le publie : sinon personne ne le
+  // verrait. Les candidatures de personnes sorties du nouveau public sont
+  // effacées — elles ne pourraient plus être validées honnêtement.
+  async proposeOnMarket(companyId: string, shiftId: string, dto: ProposeShiftOnMarketDto) {
+    const shift = await this.findOne(companyId, shiftId);
+    ensureNotEnded(shift.endsAt, 'Ce shift est terminé, il ne peut plus être proposé');
+    if (shift.status === 'cancelled') {
+      throw new BadRequestException('Un shift annulé ne peut pas être proposé');
+    }
+    if (shift.assignments.some((a) => a.status !== 'cancelled')) {
+      throw new ConflictException('Ce shift a déjà un titulaire');
+    }
+
+    const siteIds = dto.scope === 'sites' ? [...new Set(dto.siteIds ?? [])] : [];
+    const userIds = dto.scope === 'employees' ? [...new Set(dto.userIds ?? [])] : [];
+    if (siteIds.length > 0) {
+      const count = await this.prisma.site.count({ where: { id: { in: siteIds }, companyId } });
+      if (count !== siteIds.length) {
+        throw new NotFoundException('Site introuvable');
+      }
+    }
+    if (userIds.length > 0) {
+      const count = await this.prisma.user.count({ where: { id: { in: userIds }, companyId } });
+      if (count !== userIds.length) {
+        throw new NotFoundException('Utilisateur introuvable');
+      }
+    }
+
+    const updated = await this.prisma.shift.update({
+      where: { id: shiftId },
+      data: {
+        marketScope: dto.scope,
+        marketSiteIds: siteIds,
+        marketUserIds: userIds,
+        ...(shift.status === 'draft' ? { status: 'published' as const } : {}),
+      },
+    });
+
+    const applications = await this.prisma.shiftApplication.findMany({
+      where: { shiftId },
+      include: { user: { select: { siteId: true } } },
+    });
+    const outOfAudience = applications
+      .filter((a) => !isInMarketAudience(updated, a.userId, a.user.siteId))
+      .map((a) => a.id);
+    if (outOfAudience.length > 0) {
+      await this.prisma.shiftApplication.deleteMany({ where: { id: { in: outOfAudience } } });
+    }
+
+    this.realtime.emitToCompany(companyId, 'shifts:changed');
+    return updated;
   }
 
   private async findOwnedAssignment(companyId: string, id: string) {
@@ -731,6 +786,38 @@ function zonedParts(
 function ensureNotEnded(endsAt: Date, message: string) {
   if (endsAt.getTime() <= Date.now()) {
     throw new ConflictException(message);
+  }
+}
+
+// Public d'un créneau libre (décision #33), en deux versions qui doivent
+// rester identiques : filtre Prisma (liste du marché) et test en mémoire
+// (candidature). Un employé sans site voit les créneaux "son magasin" et
+// "sites précis" de tous les sites, comme partout ailleurs (décision #25).
+function marketAudienceWhere(userId: string, siteId: string | null) {
+  return {
+    OR: [
+      { marketScope: 'site' as const, ...(siteId ? { siteId } : {}) },
+      { marketScope: 'all_sites' as const },
+      { marketScope: 'sites' as const, ...(siteId ? { marketSiteIds: { has: siteId } } : {}) },
+      { marketScope: 'employees' as const, marketUserIds: { has: userId } },
+    ],
+  };
+}
+
+function isInMarketAudience(
+  shift: { siteId: string; marketScope: string; marketSiteIds: string[]; marketUserIds: string[] },
+  userId: string,
+  siteId: string | null,
+): boolean {
+  switch (shift.marketScope) {
+    case 'all_sites':
+      return true;
+    case 'sites':
+      return !siteId || shift.marketSiteIds.includes(siteId);
+    case 'employees':
+      return shift.marketUserIds.includes(userId);
+    default:
+      return !siteId || shift.siteId === siteId;
   }
 }
 

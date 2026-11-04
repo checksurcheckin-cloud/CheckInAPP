@@ -12,6 +12,7 @@ import type {
   PresentEmployee,
   RotatingQrCode,
   Shift,
+  ProposeShiftOnMarketPayload,
   ShiftAssignment,
   ShiftOffer,
   ShiftOfferCandidate,
@@ -333,6 +334,12 @@ export class ApiClient {
 
   assignShift(shiftId: string, userId: string) {
     return this.request<ShiftAssignment>('POST', `/shifts/${shiftId}/assign`, { userId });
+  }
+
+  // Choisit à qui un créneau libre est proposé sur le marché (publie le
+  // shift s'il était encore brouillon).
+  proposeShiftOnMarket(shiftId: string, payload: ProposeShiftOnMarketPayload) {
+    return this.request<Shift>('POST', `/shifts/${shiftId}/market`, payload);
   }
 
   // Marché de shifts : offres d'échange ouvertes des collègues (jamais les

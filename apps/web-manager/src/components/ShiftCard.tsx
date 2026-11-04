@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { Copy, Lock, Send, X } from 'lucide-react';
+import { Copy, Lock, Megaphone, Send, X } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
-import type { Availability, Shift, User } from '@horaires/shared-types';
+import type { Shift } from '@horaires/shared-types';
 import { DRAG_CURSOR, DRAG_CURSOR_ACTIVE } from '../lib/cursors';
 import { durationMinutes, formatDurationLabel, isEnded } from '../lib/date';
-import { isEmployeeAvailableForShift } from '../lib/availability';
+import { marketScopeLabel } from './MarketProposalDialog';
 
 type Props = {
   shift: Shift;
@@ -15,15 +15,12 @@ type Props = {
   // qu'un shift garde toujours la même couleur au lieu d'un hash qui pouvait
   // coïncider avec un autre shift du même jour.
   palette: { bg: string; text: string };
-  employees: User[];
-  availabilities: Availability[];
-  // Tous les shifts de ce jour, n'importe quel employé, assignés ou non —
-  // sert à exclure du sélecteur un employé déjà occupé ce jour-là (voir
-  // assignableEmployees), pas seulement en cas de chevauchement horaire.
-  dayShifts: Shift[];
   onDelete: (id: string) => void;
   onDuplicate: (shift: Shift) => void;
-  onAssign: (shiftId: string, userId: string) => void;
+  // Ligne « Shifts disponibles » : choisir à qui le créneau est proposé sur
+  // le marché (décision #33). L'assignation directe se fait par
+  // glisser-déposer sur la ligne d'un employé.
+  onProposeOnMarket: (shift: Shift) => void;
   onEdit: (shift: Shift) => void;
   onPublish: (shiftId: string) => void;
   busy: boolean;
@@ -41,12 +38,9 @@ type Props = {
 export function ShiftCard({
   shift,
   palette,
-  employees,
-  availabilities,
-  dayShifts,
   onDelete,
   onDuplicate,
-  onAssign,
+  onProposeOnMarket,
   onEdit,
   onPublish,
   busy,
@@ -57,25 +51,6 @@ export function ShiftCard({
   // assignable, publiable ni supprimable — le backend le refuserait en 409.
   const ended = isEnded(shift.endsAt);
   const [isPressed, setIsPressed] = useState(false);
-
-  // Employés déjà occupés ce jour-là (n'importe quel autre shift, assigné
-  // n'importe quand dans la journée — pas seulement un chevauchement
-  // horaire) : on ne les propose pas dans le sélecteur, pour ne pas
-  // encourager à leur ajouter un second shift le même jour.
-  const employeeIdsBusyToday = new Set(
-    dayShifts
-      .filter((s) => s.id !== shift.id)
-      .flatMap((s) => (s.assignments ?? []).filter((a) => a.status !== 'cancelled').map((a) => a.userId)),
-  );
-
-  // Ne propose que les employés réellement disponibles sur CE créneau (pas
-  // juste "quelque part ce jour-là") — sinon le sélecteur laisse choisir un
-  // employé que ShiftsService.assign refuserait de toute façon en 409.
-  const assignableEmployees = employees.filter(
-    (e) =>
-      !employeeIdsBusyToday.has(e.id) &&
-      isEmployeeAvailableForShift(availabilities, e.id, new Date(shift.startsAt), new Date(shift.endsAt)),
-  );
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `shift-${shift.id}`,
@@ -143,21 +118,23 @@ export function ShiftCard({
         {shift.roleNeeded ? <span style={{ ...styles.role, color: palette.text }}>{shift.roleNeeded}</span> : null}
       </div>
 
-      {!ended && !hasAssignment && assignableEmployees.length > 0 ? (
-        <select
-          style={styles.assignSelect}
+      {!ended && !hasAssignment ? (
+        <button
+          type="button"
+          className="btn"
+          style={styles.marketButton}
           disabled={busy}
-          value=""
           onPointerDown={(e) => e.stopPropagation()}
-          onChange={(e) => e.target.value && onAssign(shift.id, e.target.value)}
+          onClick={() => onProposeOnMarket(shift)}
+          title={
+            isDraft
+              ? 'Choisir à qui proposer ce créneau (le publie)'
+              : 'Choisir à qui ce créneau est proposé sur le marché'
+          }
         >
-          <option value="">+ Assigner…</option>
-          {assignableEmployees.map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.firstName} {e.lastName}
-            </option>
-          ))}
-        </select>
+          <Megaphone size={11} strokeWidth={2.25} />
+          <span style={styles.marketButtonText}>{isDraft ? 'Proposer' : `Marché : ${marketScopeLabel(shift)}`}</span>
+        </button>
       ) : null}
 
       {ended ? null : (
@@ -216,16 +193,22 @@ const styles: Record<string, React.CSSProperties> = {
   time: { fontSize: typography.sizes.sm, fontWeight: 700, display: 'block', lineHeight: 1.3 },
   duration: { fontSize: typography.sizes.xs, fontWeight: 600, opacity: 0.85 },
   role: { fontSize: 11, opacity: 0.75, marginTop: 2 },
-  assignSelect: {
+  marketButton: {
     marginTop: spacing.xs,
     width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
     fontSize: 11,
-    padding: 3,
+    fontWeight: 600,
+    padding: '3px 6px',
     borderRadius: radius.sm,
-    border: `1px solid ${colors.surface}`,
+    border: 'none',
     color: colors.textSecondary,
     backgroundColor: colors.surface,
+    cursor: 'pointer',
   },
+  marketButtonText: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   cardActions: {
     position: 'absolute',
     top: spacing.xs,

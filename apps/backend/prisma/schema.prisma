@@ -27,6 +27,15 @@ enum ShiftStatus {
   cancelled
 }
 
+// Public d'un créneau libre sur le marché (décision #33) : `site` = défaut
+// (employés du magasin du shift), sinon élargi/restreint par le manager.
+enum MarketScope {
+  site
+  all_sites
+  sites
+  employees
+}
+
 enum AssignmentStatus {
   assigned
   offered
@@ -187,6 +196,10 @@ model Shift {
   roleNeeded String?     @map("role_needed")
   status     ShiftStatus @default(draft)
   createdBy  String      @map("created_by")
+
+  marketScope   MarketScope @default(site) @map("market_scope")
+  marketSiteIds String[]    @default([]) @map("market_site_ids")
+  marketUserIds String[]    @default([]) @map("market_user_ids")
 
   assignments  ShiftAssignment[]
   applications ShiftApplication[]

@@ -839,6 +839,23 @@ Cible : PME de 20-100 employés par site.
       spécifiques » (calcul client via `GET /shifts` sur la fenêtre du
       créneau, tous sites) et les retire de la sélection envoyée.
 
+34. **Prendre un shift sur le marché un jour déclaré indisponible propose de
+    lever l'indisponibilité pour ce jour-là, au lieu d'échouer en 409.**
+    checkin-mobile `ShiftMarketplaceScreen` : avant de candidater,
+    `findBlockingUnavailability` (`src/lib/unavailability.ts`, miroir client
+    d'`ensureAvailable` — exception `specificDate` prioritaire sur la
+    récurrence `dayOfWeek`, seule une ligne `isAvailable: false` qui
+    chevauche l'horaire du shift bloque) détecte le conflit et ouvre une
+    fenêtre « Vous êtes indisponible ce jour-là ».
+    - Oui → l'indisponibilité est levée pour **ce jour seulement**, puis la
+      candidature part. Exception ponctuelle existante : repassée à
+      `isAvailable: true` journée entière. Indisponibilité **récurrente** :
+      jamais modifiée — on crée une exception `specificDate` disponible sur
+      ce jour (même mécanisme que « Garder la récurrence, libérer cette
+      semaine », décision #18), la récurrence reste pour les autres semaines.
+    - Non → rien n'est envoyé. Aucun changement backend : `ensureAvailable`
+      revérifie toujours à la candidature et à l'assignation.
+
 ## Stack
 
 - Backend : NestJS + PostgreSQL + Prisma + Passport/JWT

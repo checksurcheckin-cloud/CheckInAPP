@@ -249,7 +249,7 @@ export function TeamPage() {
               <th style={styles.th}>Statut</th>
               <th style={styles.th}>Badge</th>
               <th style={styles.th}>PIN</th>
-              <th style={styles.th}>Pointage mobile</th>
+              <th style={styles.th}>Pointage QR</th>
               <th style={styles.th}>Pointage GPS</th>
             </tr>
           </thead>

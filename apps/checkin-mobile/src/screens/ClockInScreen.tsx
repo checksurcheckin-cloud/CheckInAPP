@@ -34,14 +34,18 @@ function initials(firstName?: string, lastName?: string) {
 
 export function ClockInScreen() {
   const { user } = useAuth();
-  // GPS désactivé (entreprise ou surcharge employé, décision #9) : l'option
+  // Deux méthodes indépendantes (décisions #9 et #35) : une méthode coupée
   // n'apparaît pas du tout, plutôt que d'échouer en 403 au moment de pointer.
-  const gpsEnabled = useClockInSettings()?.gpsClockInEnabled ?? false;
+  // GPS seul : le formulaire GPS est affiché d'emblée, sans QR.
+  const clockInSettings = useClockInSettings();
+  const qrEnabled = clockInSettings?.mobileClockInEnabled ?? true;
+  const gpsEnabled = clockInSettings?.gpsClockInEnabled ?? false;
   const [sites, setSites] = useState<Site[]>([]);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [lastEntry, setLastEntry] = useState<TimeEntry | null>(null);
   const [selectedType, setSelectedType] = useState<TimeEntryType | null>(null);
   const [showOtherMethods, setShowOtherMethods] = useState(false);
+  const gpsOpen = gpsEnabled && (!qrEnabled || showOtherMethods);
   const [showPinFallback, setShowPinFallback] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [banner, setBanner] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
@@ -122,11 +126,26 @@ export function ClockInScreen() {
         </View>
       ) : null}
 
-      <View style={styles.hero}>
-        <PersonalQrCode />
-      </View>
-
-      <Text style={styles.caption}>Présentez ce code à la tablette du site</Text>
+      {qrEnabled ? (
+        <>
+          <View style={styles.hero}>
+            <PersonalQrCode />
+          </View>
+          <Text style={styles.caption}>Présentez ce code à la tablette du site</Text>
+        </>
+      ) : (
+        // GPS seul : un visuel à la place du QR, pour que l'écran garde un
+        // point d'ancrage clair sur ce qu'on y fait.
+        <View style={styles.hero}>
+          <View style={styles.gpsHaloOuter}>
+            <View style={styles.gpsHaloInner}>
+              <Ionicons name="location" size={46} color={colors.surface} />
+            </View>
+          </View>
+          <Text style={styles.gpsOnlyTitle}>Pointer par GPS</Text>
+          <Text style={styles.gpsOnlyCaption}>Choisissez le site et l'action, votre position confirme le pointage</Text>
+        </View>
+      )}
 
       {showPinFallback ? (
         <View style={styles.pinNoticeWrap}>
@@ -141,14 +160,14 @@ export function ClockInScreen() {
 
       {banner ? <ConfirmationBanner kind={banner.kind} message={banner.message} onHide={() => setBanner(null)} /> : null}
 
-      {gpsEnabled ? (
+      {gpsEnabled && qrEnabled ? (
         <Pressable onPress={() => setShowOtherMethods((v) => !v)} style={styles.otherMethodsToggle}>
           <Text style={styles.otherMethodsText}>Autres méthodes de pointage</Text>
           <Ionicons name={showOtherMethods ? 'chevron-up' : 'chevron-down'} size={15} color={colors.textSecondary} />
         </Pressable>
       ) : null}
 
-      {gpsEnabled && showOtherMethods ? (
+      {gpsOpen ? (
         <View style={styles.otherMethodsPanel}>
           {lastEntry ? (
             <Text style={styles.status}>
@@ -197,6 +216,25 @@ export function ClockInScreen() {
 }
 
 const styles = StyleSheet.create({
+  gpsHaloOuter: {
+    width: 148,
+    height: 148,
+    borderRadius: 74,
+    backgroundColor: colors.primaryTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gpsHaloInner: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...nativeShadow.lg,
+  },
+  gpsOnlyTitle: { fontFamily: fonts.display, fontSize: 19, color: colors.textPrimary, marginTop: 20 },
+  gpsOnlyCaption: { textAlign: 'center', fontSize: 13.5, color: colors.textSecondary, marginTop: 6, paddingHorizontal: 12 },
   container: { flex: 1, backgroundColor: colors.background },
   content: { paddingTop: 28, paddingHorizontal: 24, paddingBottom: spacing.xl },
 

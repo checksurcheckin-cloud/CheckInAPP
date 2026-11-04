@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { colors, spacing, radius, nativeShadow } from '@horaires/ui-tokens';
+import { useClockInSettings } from '../services/ClockInSettings';
 
 const TAB_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   ClockIn: 'qr-code-outline',
@@ -32,6 +33,8 @@ const FAB_SIZE = 62;
 // jamais sur un item voisin.
 export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const fabIndex = state.routes.findIndex((r) => r.name === 'ClockIn');
+  // GPS seul (QR coupé) : l'icône du bouton central suit la méthode dispo.
+  const qrEnabled = useClockInSettings()?.mobileClockInEnabled ?? true;
   const sideRoutes = state.routes.filter((r) => r.name !== 'ClockIn');
   const mid = Math.ceil(sideRoutes.length / 2);
   const left = sideRoutes.slice(0, mid);
@@ -77,7 +80,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
           accessibilityRole="button"
           accessibilityLabel="Pointer"
         >
-          <Ionicons name="qr-code-outline" size={26} color={colors.surface} />
+          <Ionicons name={qrEnabled ? 'qr-code-outline' : 'location-outline'} size={26} color={colors.surface} />
         </Pressable>
       ) : null}
       {/* Sans onglet Pointage (pointage mobile désactivé, décision #35) :

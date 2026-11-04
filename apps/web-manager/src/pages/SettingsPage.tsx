@@ -44,8 +44,8 @@ export function SettingsPage() {
         <div style={styles.card}>
           <SettingRow
             icon={<Smartphone size={18} color={colors.primary} strokeWidth={2.25} />}
-            title="Pointage depuis l'app mobile"
-            description="Autorise par défaut les employés à pointer avec leur téléphone (QR à présenter à la tablette, GPS). Désactivé, l'onglet Pointage disparaît de l'app mobile et le Planning devient l'écran d'accueil : on pointe alors uniquement par PIN ou badge sur la tablette."
+            title="Pointage par QR sur le téléphone"
+            description="Autorise par défaut les employés à afficher sur leur téléphone le QR que la tablette scanne. Si le QR et le GPS sont tous deux désactivés, l'onglet Pointage disparaît de l'app mobile et le Planning devient l'écran d'accueil : on pointe alors uniquement par PIN ou badge sur la tablette."
             checked={company.mobileClockInEnabled}
             disabled={!isAdmin || isSaving}
             onToggle={() => toggle('mobileClockInEnabled')}
@@ -54,15 +54,10 @@ export function SettingsPage() {
           <SettingRow
             icon={<MapPin size={18} color={colors.primary} strokeWidth={2.25} />}
             title="Pointage GPS"
-            description="Autorise par défaut les employés à pointer via la géolocalisation de leur téléphone. Désactivé, l'option GPS n'apparaît plus dans l'app mobile."
+            description="Autorise par défaut les employés à pointer via la géolocalisation de leur téléphone, indépendamment du QR. Désactivé, l'option GPS n'apparaît plus dans l'app mobile."
             checked={company.gpsClockInEnabled}
             disabled={!isAdmin || isSaving}
             onToggle={() => toggle('gpsClockInEnabled')}
-            note={
-              !company.mobileClockInEnabled
-                ? "Sans effet tant que le pointage depuis l'app mobile est désactivé."
-                : undefined
-            }
           />
           <p style={styles.status}>
             Ces deux réglages peuvent être surchargés individuellement pour chaque employé depuis l'écran Équipe.

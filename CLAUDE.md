@@ -857,33 +857,39 @@ Cible : PME de 20-100 employés par site.
     - Non → rien n'est envoyé. Aucun changement backend : `ensureAvailable`
       revérifie toujours à la candidature et à l'assignation.
 
-35. **Pointage depuis l'app mobile désactivable, à deux niveaux comme le GPS
-    (décision #9) — désactivé, l'onglet Pointage disparaît et le Planning
-    devient l'écran d'accueil de checkin-mobile.**
+35. **Pointage par QR sur le téléphone désactivable, à deux niveaux comme
+    le GPS (décision #9) et indépendamment de lui — si QR ET GPS sont
+    coupés, l'onglet Pointage disparaît et le Planning devient l'écran
+    d'accueil de checkin-mobile.**
     - `Company.mobileClockInEnabled` (défaut `true`) + `User.mobileClockInEnabled`
-      nullable (surcharge, `null` = hérite). Résolution unique dans
+      nullable (surcharge, `null` = hérite) — couvre le **QR rotatif**
+      affiché sur le téléphone. Résolution unique dans
       `users/clock-in-settings.ts` (`resolveClockInSettings`) : surcharge >
-      entreprise, et **le GPS n'est jamais actif sans pointage mobile**
-      (`gpsClockInEnabled` résolu = mobile && gps).
-    - Appliqué côté backend, pas seulement masqué : 403 sur
-      `GET /users/me/rotating-qr` (plus de QR à afficher), sur
-      `POST /time-entries/scan-rotating-qr` (la tablette refuse le QR d'un
-      employé dont le pointage mobile est coupé) et sur tout
-      `POST /time-entries/self`. **PIN et badge sur la tablette restent
-      toujours ouverts** — ce sont les filets de sécurité (décision #2).
+      entreprise, pour chacun des deux réglages. **Les deux sont
+      indépendants** (demande explicite) : GPS seul, QR seul, les deux ou
+      aucun.
+    - Appliqué côté backend, pas seulement masqué : QR coupé => 403 sur
+      `GET /users/me/rotating-qr` et sur `POST /time-entries/scan-rotating-qr`
+      (la tablette refuse le QR de cet employé) ; `POST /time-entries/self`
+      vérifie le réglage de la méthode utilisée (`gps` -> GPS, sinon QR).
+      **PIN et badge sur la tablette restent toujours ouverts** — ce sont les
+      filets de sécurité (décision #2).
     - checkin-mobile : `GET /users/me/clock-in-settings` chargé au démarrage
-      (`ClockInSettingsProvider`), rechargé au retour au premier plan et sur
-      l'événement websocket `settings:changed` (émis par
-      `CompaniesService.updateSettings` et `UsersService.updateSettings` quand
-      un réglage de pointage change). Pointage mobile coupé : pas d'onglet
-      `ClockIn`, `initialRouteName: 'Planning'`, et `FloatingTabBar` retire le
-      bouton central. GPS coupé : la section « Autres méthodes de pointage »
-      (le GPS) n'est plus affichée du tout. Échec du premier chargement →
-      app complète par défaut (le backend reste l'arbitre).
+      (`ClockInSettingsProvider`), rechargé au retour au premier plan, à
+      chaque reconnexion du websocket et sur l'événement `settings:changed`
+      (émis par `CompaniesService.updateSettings` et
+      `UsersService.updateSettings` quand un réglage de pointage change) ; en
+      cas d'échec, l'app complète reste affichée et la lecture est retentée
+      toutes les 15 s (le backend reste l'arbitre). Onglet `ClockIn` présent
+      si QR **ou** GPS ; sinon `initialRouteName: 'Planning'` et
+      `FloatingTabBar` retire le bouton central (icône QR, ou épingle de
+      localisation en GPS seul). Écran Pointage : QR seul = QR sans section
+      GPS ; GPS seul = formulaire GPS affiché d'emblée, sans QR ; les deux =
+      QR + GPS repliable dans « Autres méthodes de pointage ».
     - web-manager : deux interrupteurs dans Réglages (`SettingsPage`,
-      `updateCompanySettings` accepte maintenant des champs partiels) et une
-      colonne « Pointage mobile » à côté de « Pointage GPS » dans Équipe
-      (même sélecteur tri-state hériter/activé/désactivé).
+      `updateCompanySettings` accepte des champs partiels) et une colonne
+      « Pointage QR » à côté de « Pointage GPS » dans Équipe (même sélecteur
+      tri-state hériter/activé/désactivé).
 
 ## Stack
 

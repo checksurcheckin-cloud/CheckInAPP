@@ -236,7 +236,7 @@ describe('UsersService', () => {
     expect(realtime.emitToCompany).toHaveBeenCalledWith('company-a', 'settings:changed');
   });
 
-  it('resolves clock-in settings scoped to the company, user override first, gps off when mobile is off', async () => {
+  it('resolves clock-in settings scoped to the company, user override first, each setting independent', async () => {
     prisma.user.findFirst.mockResolvedValueOnce({
       gpsClockInEnabled: null,
       mobileClockInEnabled: false,
@@ -245,7 +245,7 @@ describe('UsersService', () => {
 
     await expect(service.getClockInSettings('company-a', 'user-1')).resolves.toEqual({
       mobileClockInEnabled: false,
-      gpsClockInEnabled: false,
+      gpsClockInEnabled: true,
     });
     expect(prisma.user.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'user-1', companyId: 'company-a' } }),

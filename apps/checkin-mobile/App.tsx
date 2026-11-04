@@ -90,10 +90,10 @@ function MainWithSettings() {
   );
 }
 
-// Pointage depuis l'app désactivé (réglage entreprise ou surcharge employé,
-// décision #35) : pas d'onglet Pointage, et le Planning devient l'écran
-// d'accueil. La `key` remonte le navigateur quand le réglage bascule, pour
-// repartir sur le bon écran d'accueil.
+// Ni QR ni GPS autorisés sur le téléphone (réglages entreprise ou surcharges
+// employé, décisions #9 et #35) : pas d'onglet Pointage, et le Planning
+// devient l'écran d'accueil. L'un des deux suffit à garder l'onglet. La `key`
+// remonte le navigateur quand ça bascule, pour repartir sur le bon accueil.
 function MainTabs() {
   const settings = useClockInSettings();
 
@@ -105,7 +105,7 @@ function MainTabs() {
     );
   }
 
-  const mobileClockIn = settings.mobileClockInEnabled;
+  const mobileClockIn = settings.mobileClockInEnabled || settings.gpsClockInEnabled;
   return (
     <Tab.Navigator
       key={mobileClockIn ? 'with-clock-in' : 'planning-home'}

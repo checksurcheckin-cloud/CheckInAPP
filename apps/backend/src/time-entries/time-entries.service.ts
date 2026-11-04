@@ -341,21 +341,21 @@ export class TimeEntriesService {
     return last?.type === 'clock_in' ? 'clock_out' : 'clock_in';
   }
 
-  // Tout auto-pointage passe par l'app mobile : refusé si le pointage mobile
-  // est coupé (décision #35), et le GPS a en plus son propre réglage
-  // (décision #9). Surcharge individuelle > réglage entreprise, voir
-  // resolveClockInSettings.
+  // Chaque méthode d'auto-pointage a son propre réglage (indépendants,
+  // décisions #9 et #35) : le GPS suit gpsClockInEnabled, l'ancien chemin QR
+  // côté téléphone suit mobileClockInEnabled. Surcharge individuelle >
+  // réglage entreprise, voir resolveClockInSettings.
   private async ensureSelfClockInAllowed(userId: string, source: CreateSelfTimeEntryDto['source']) {
     const requester = await this.prisma.user.findUnique({
       where: { id: userId },
       select: CLOCK_IN_SETTINGS_SELECT,
     });
     const settings = resolveClockInSettings(requester);
-    if (!settings.mobileClockInEnabled) {
-      throw new ForbiddenException(MOBILE_CLOCK_IN_DISABLED_MESSAGE);
-    }
     if (source === 'gps' && !settings.gpsClockInEnabled) {
       throw new ForbiddenException("Le pointage GPS n'est pas autorisé pour cet utilisateur");
+    }
+    if (source !== 'gps' && !settings.mobileClockInEnabled) {
+      throw new ForbiddenException(MOBILE_CLOCK_IN_DISABLED_MESSAGE);
     }
   }
 }

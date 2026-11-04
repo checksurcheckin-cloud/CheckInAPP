@@ -232,17 +232,18 @@ describe('TimeEntriesService', () => {
       expect(prisma.timeEntry.create).not.toHaveBeenCalled();
     });
 
-    it('blocks gps when mobile clock-in is off, even if gps itself is enabled (décision #35)', async () => {
+    it('still allows gps when QR clock-in is off — the two settings are independent (décision #35)', async () => {
       prisma.user.findUnique.mockResolvedValue({
-        gpsClockInEnabled: true,
-        mobileClockInEnabled: false,
-        company: { gpsClockInEnabled: true, mobileClockInEnabled: true },
+        gpsClockInEnabled: null,
+        mobileClockInEnabled: null,
+        company: { gpsClockInEnabled: true, mobileClockInEnabled: false },
       });
+      prisma.site.findFirst.mockResolvedValue({ id: 'site-a', companyId: 'company-a' });
+      prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
 
-      await expect(
-        service.createSelf(user, { type: 'clock_in' as any, source: 'gps', siteId: 'site-a', geoLat: 50.8, geoLng: 4.35 }),
-      ).rejects.toThrow(ForbiddenException);
-      expect(prisma.timeEntry.create).not.toHaveBeenCalled();
+      await service.createSelf(user, { type: 'clock_in' as any, source: 'gps', siteId: 'site-a', geoLat: 50.8, geoLng: 4.35 });
+
+      expect(prisma.timeEntry.create).toHaveBeenCalled();
     });
 
     it('blocks a gps entry when the user has an explicit override disabling it', async () => {

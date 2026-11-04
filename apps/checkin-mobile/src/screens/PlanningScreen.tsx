@@ -130,6 +130,18 @@ export function PlanningScreen() {
     [shifts, monthAnchor],
   );
 
+  // Le prochain shift = le premier pas encore terminé (un shift en cours
+  // compte encore), tous mois confondus — seule carte encadrée de la liste.
+  const nextShiftId = useMemo(() => {
+    const now = Date.now();
+    let next: Shift | null = null;
+    for (const s of shifts) {
+      if (new Date(s.endsAt).getTime() <= now) continue;
+      if (!next || s.startsAt < next.startsAt) next = s;
+    }
+    return next?.id ?? null;
+  }, [shifts]);
+
   const goToMonth = (delta: number) => {
     setMonthAnchor((prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1));
     // Remonte la liste et redéplie la grille — un nouveau mois se présente
@@ -161,8 +173,17 @@ export function PlanningScreen() {
     const pending = mine ? PENDING_STATUSES.has(mine.status) : false;
     const startDate = new Date(item.startsAt);
     const isToday = isSameDay(startDate, today);
+    const isNext = item.id === nextShiftId;
+    // Un seul encadré à la fois : le prochain shift (en cours compris). Un
+    // shift d'aujourd'hui déjà terminé n'est plus mis en avant.
     return (
-      <View style={[styles.card, isToday ? styles.cardToday : null]}>
+      <View style={[styles.card, isNext ? styles.cardToday : null]}>
+        {isNext ? (
+          <View style={styles.nextTag}>
+            <Ionicons name="arrow-forward-circle" size={13} color={colors.primary} />
+            <Text style={styles.nextTagText}>Prochain shift</Text>
+          </View>
+        ) : null}
         <View style={styles.cardTop}>
           <Text style={styles.cardDay}>
             {isToday
@@ -348,6 +369,8 @@ const styles = StyleSheet.create({
   // Ressort du reste de la liste — même teinte que le reste de l'app pour
   // "aujourd'hui" (avatar, jour courant du calendrier ci-dessus).
   cardToday: { backgroundColor: colors.primaryTint, borderWidth: 1.5, borderColor: colors.primary },
+  nextTag: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  nextTagText: { fontSize: 12, fontWeight: '700', color: colors.primary, textTransform: 'uppercase', letterSpacing: 0.4 },
   cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   cardDay: { fontSize: 12, fontWeight: '600', color: colors.textSecondary, textTransform: 'capitalize' },
   chip: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999 },

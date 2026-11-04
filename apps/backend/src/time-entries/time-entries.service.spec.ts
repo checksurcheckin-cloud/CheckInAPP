@@ -160,8 +160,23 @@ describe('TimeEntriesService', () => {
       );
       expect(prisma.user.findFirst).toHaveBeenCalledWith({
         where: { id: 'user-of-company-b', companyId: 'company-a' },
-        select: { id: true, firstName: true, lastName: true },
+        select: expect.objectContaining({ id: true, firstName: true, lastName: true }),
       });
+      expect(rotatingQrService.verifyCode).not.toHaveBeenCalled();
+      expect(prisma.timeEntry.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses the rotating QR when mobile clock-in is disabled for the company (décision #35)', async () => {
+      rotatingQrService.decodePayload.mockReturnValue({ userId: 'user-1', code: '123456' });
+      prisma.user.findFirst.mockResolvedValue({
+        id: 'user-1',
+        firstName: 'A',
+        lastName: 'B',
+        mobileClockInEnabled: null,
+        company: { mobileClockInEnabled: false },
+      });
+
+      await expect(service.createFromRotatingQr(device, { payload })).rejects.toThrow(ForbiddenException);
       expect(rotatingQrService.verifyCode).not.toHaveBeenCalled();
       expect(prisma.timeEntry.create).not.toHaveBeenCalled();
     });
@@ -214,6 +229,19 @@ describe('TimeEntriesService', () => {
           geoLng: 4.35,
         }),
       ).rejects.toThrow(NotFoundException);
+      expect(prisma.timeEntry.create).not.toHaveBeenCalled();
+    });
+
+    it('blocks gps when mobile clock-in is off, even if gps itself is enabled (décision #35)', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        gpsClockInEnabled: true,
+        mobileClockInEnabled: false,
+        company: { gpsClockInEnabled: true, mobileClockInEnabled: true },
+      });
+
+      await expect(
+        service.createSelf(user, { type: 'clock_in' as any, source: 'gps', siteId: 'site-a', geoLat: 50.8, geoLng: 4.35 }),
+      ).rejects.toThrow(ForbiddenException);
       expect(prisma.timeEntry.create).not.toHaveBeenCalled();
     });
 

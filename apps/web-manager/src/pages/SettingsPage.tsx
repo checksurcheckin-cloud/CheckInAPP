@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { MapPin } from 'lucide-react';
+import { MapPin, Smartphone } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { Company } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
@@ -20,13 +20,12 @@ export function SettingsPage() {
       .finally(() => setIsLoading(false));
   }, []);
 
-  const toggleGpsClockIn = async () => {
+  const toggle = async (key: 'gpsClockInEnabled' | 'mobileClockInEnabled') => {
     if (!company || !isAdmin) return;
     setError(null);
     setIsSaving(true);
-    const next = !company.gpsClockInEnabled;
     try {
-      const updated = await apiClient.updateCompanySettings({ gpsClockInEnabled: next });
+      const updated = await apiClient.updateCompanySettings({ [key]: !company[key] });
       setCompany(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Échec de la mise à jour');
@@ -43,56 +42,77 @@ export function SettingsPage() {
         <p style={styles.muted}>Chargement…</p>
       ) : company ? (
         <div style={styles.card}>
-          <div style={styles.rowHeader}>
-            <div style={styles.iconMark}>
-              <MapPin size={18} color={colors.primary} strokeWidth={2.25} />
-            </div>
-            <div style={{ flex: 1 }}>
-              <h2 style={styles.sectionTitle}>Pointage GPS</h2>
-              <p style={styles.description}>
-                Autorise par défaut les employés de l'entreprise à pointer via la géolocalisation
-                de leur téléphone, en plus du QR, du badge et du PIN. Ce réglage peut être
-                surchargé individuellement pour chaque employé depuis l'écran Équipe.
-              </p>
-            </div>
-            <label style={styles.switchWrap}>
-              <input
-                type="checkbox"
-                checked={company.gpsClockInEnabled}
-                disabled={!isAdmin || isSaving}
-                onChange={toggleGpsClockIn}
-                style={styles.switchInput}
-              />
-              <span
-                style={{
-                  ...styles.switchTrack,
-                  backgroundColor: company.gpsClockInEnabled ? colors.primary : colors.border,
-                }}
-              >
-                <span
-                  style={{
-                    ...styles.switchThumb,
-                    transform: company.gpsClockInEnabled ? 'translateX(18px)' : 'translateX(0px)',
-                  }}
-                />
-              </span>
-            </label>
-          </div>
+          <SettingRow
+            icon={<Smartphone size={18} color={colors.primary} strokeWidth={2.25} />}
+            title="Pointage depuis l'app mobile"
+            description="Autorise par défaut les employés à pointer avec leur téléphone (QR à présenter à la tablette, GPS). Désactivé, l'onglet Pointage disparaît de l'app mobile et le Planning devient l'écran d'accueil : on pointe alors uniquement par PIN ou badge sur la tablette."
+            checked={company.mobileClockInEnabled}
+            disabled={!isAdmin || isSaving}
+            onToggle={() => toggle('mobileClockInEnabled')}
+          />
+          <div style={styles.divider} />
+          <SettingRow
+            icon={<MapPin size={18} color={colors.primary} strokeWidth={2.25} />}
+            title="Pointage GPS"
+            description="Autorise par défaut les employés à pointer via la géolocalisation de leur téléphone. Désactivé, l'option GPS n'apparaît plus dans l'app mobile."
+            checked={company.gpsClockInEnabled}
+            disabled={!isAdmin || isSaving}
+            onToggle={() => toggle('gpsClockInEnabled')}
+            note={
+              !company.mobileClockInEnabled
+                ? "Sans effet tant que le pointage depuis l'app mobile est désactivé."
+                : undefined
+            }
+          />
           <p style={styles.status}>
-            Pointage GPS actuellement{' '}
-            <strong style={{ color: company.gpsClockInEnabled ? colors.success : colors.danger }}>
-              {company.gpsClockInEnabled ? 'activé' : 'désactivé'}
-            </strong>{' '}
-            par défaut pour l'entreprise.
+            Ces deux réglages peuvent être surchargés individuellement pour chaque employé depuis l'écran Équipe.
           </p>
-          {!isAdmin ? (
-            <p style={styles.muted}>Seul un administrateur peut modifier ce réglage.</p>
-          ) : null}
+          {!isAdmin ? <p style={styles.muted}>Seul un administrateur peut modifier ces réglages.</p> : null}
           {error ? <p style={styles.error}>{error}</p> : null}
         </div>
       ) : (
         <p style={styles.muted}>Impossible de charger les réglages de l'entreprise.</p>
       )}
+    </div>
+  );
+}
+
+function SettingRow({
+  icon,
+  title,
+  description,
+  checked,
+  disabled,
+  onToggle,
+  note,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  checked: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+  note?: string;
+}) {
+  return (
+    <div style={styles.rowHeader}>
+      <div style={styles.iconMark}>{icon}</div>
+      <div style={{ flex: 1 }}>
+        <h2 style={styles.sectionTitle}>
+          {title}{' '}
+          <span style={{ ...styles.stateTag, color: checked ? colors.success : colors.danger }}>
+            {checked ? 'activé' : 'désactivé'}
+          </span>
+        </h2>
+        <p style={styles.description}>{description}</p>
+        {note ? <p style={styles.note}>{note}</p> : null}
+      </div>
+      <label style={styles.switchWrap}>
+        <input type="checkbox" checked={checked} disabled={disabled} onChange={onToggle} style={styles.switchInput} />
+        <span style={{ ...styles.switchTrack, backgroundColor: checked ? colors.primary : colors.border }}>
+          <span style={{ ...styles.switchThumb, transform: checked ? 'translateX(18px)' : 'translateX(0px)' }} />
+        </span>
+      </label>
     </div>
   );
 }
@@ -141,6 +161,9 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: shadows.sm,
     transition: 'transform 0.15s ease',
   },
+  divider: { height: 1, backgroundColor: colors.border, margin: `${spacing.lg}px 0` },
+  stateTag: { fontSize: typography.sizes.xs, fontWeight: 600 },
+  note: { fontSize: typography.sizes.xs, color: colors.warning, margin: `${spacing.xs}px 0 0` },
   status: { fontSize: typography.sizes.sm, color: colors.textSecondary, marginTop: spacing.md, marginBottom: 0 },
   muted: { color: colors.textSecondary, fontSize: typography.sizes.sm },
   error: { color: colors.danger, fontSize: typography.sizes.sm, marginTop: spacing.sm },

@@ -9,6 +9,7 @@ import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { SetPinDto } from './dto/set-pin.dto';
 import { decryptPin, encryptPin, randomPin } from './pin-cipher';
 import { UpdateUserSettingsDto } from './dto/update-user-settings.dto';
+import { CLOCK_IN_SETTINGS_SELECT, resolveClockInSettings } from './clock-in-settings';
 
 const SALT_ROUNDS = 12;
 const MAX_PIN_FAILURES = 5;
@@ -25,6 +26,7 @@ const SAFE_USER_SELECT = {
   status: true,
   badgeCode: true,
   gpsClockInEnabled: true,
+  mobileClockInEnabled: true,
   siteId: true,
   createdAt: true,
 } as const;
@@ -177,6 +179,19 @@ export class UsersService implements OnApplicationBootstrap {
   // Surcharge individuelle du réglage GPS de l'entreprise, et/ou site de
   // rattachement. `null` explicite sur l'un ou l'autre champ le remet à
   // vide (réglage entreprise par défaut / aucun site) ; un champ absent du
+  // Réglages de pointage résolus de l'appelant — checkin-mobile s'en sert
+  // pour afficher ou non l'onglet Pointage et le GPS (décision #35).
+  async getClockInSettings(companyId: string, userId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, companyId },
+      select: CLOCK_IN_SETTINGS_SELECT,
+    });
+    if (!user) {
+      throw new NotFoundException('Utilisateur introuvable');
+    }
+    return resolveClockInSettings(user);
+  }
+
   // DTO (undefined) reste inchangé — Prisma ignore les clés `undefined`.
   async updateSettings(companyId: string, id: string, dto: UpdateUserSettingsDto) {
     const existing = await this.findOne(companyId, id);
@@ -190,7 +205,11 @@ export class UsersService implements OnApplicationBootstrap {
 
     const updated = await this.prisma.user.update({
       where: { id },
-      data: { gpsClockInEnabled: dto.gpsClockInEnabled, siteId: dto.siteId },
+      data: {
+        gpsClockInEnabled: dto.gpsClockInEnabled,
+        mobileClockInEnabled: dto.mobileClockInEnabled,
+        siteId: dto.siteId,
+      },
       select: SAFE_USER_SELECT,
     });
 
@@ -219,6 +238,10 @@ export class UsersService implements OnApplicationBootstrap {
       this.realtime.emitToCompany(companyId, 'shifts:changed');
     }
 
+    if (dto.gpsClockInEnabled !== undefined || dto.mobileClockInEnabled !== undefined) {
+      // checkin-mobile de cet employé affiche/masque Pointage en direct.
+      this.realtime.emitToCompany(companyId, 'settings:changed');
+    }
     return updated;
   }
 

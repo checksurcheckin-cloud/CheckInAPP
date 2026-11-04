@@ -142,13 +142,17 @@ export function TeamPage() {
     }
   };
 
-  // Surcharge individuelle du pointage GPS — tri-state : 'inherit' (null,
-  // suit le réglage entreprise), 'on' (true), 'off' (false).
-  const changeGpsSetting = async (userId: string, value: 'inherit' | 'on' | 'off') => {
+  // Surcharge individuelle d'un réglage de pointage (GPS ou app mobile) —
+  // tri-state : 'inherit' (null, suit le réglage entreprise), 'on' (true),
+  // 'off' (false).
+  const changeClockInSetting = async (
+    userId: string,
+    key: 'gpsClockInEnabled' | 'mobileClockInEnabled',
+    value: 'inherit' | 'on' | 'off',
+  ) => {
     setBusyUserId(userId);
     try {
-      const gpsClockInEnabled = value === 'inherit' ? null : value === 'on';
-      await apiClient.updateUserSettings(userId, { gpsClockInEnabled });
+      await apiClient.updateUserSettings(userId, { [key]: value === 'inherit' ? null : value === 'on' });
       await load();
     } finally {
       setBusyUserId(null);
@@ -245,6 +249,7 @@ export function TeamPage() {
               <th style={styles.th}>Statut</th>
               <th style={styles.th}>Badge</th>
               <th style={styles.th}>PIN</th>
+              <th style={styles.th}>Pointage mobile</th>
               <th style={styles.th}>Pointage GPS</th>
             </tr>
           </thead>
@@ -345,18 +350,20 @@ export function TeamPage() {
                     </button>
                   </div>
                 </td>
-                <td style={styles.td}>
-                  <select
-                    style={styles.inlineSelect}
-                    value={u.gpsClockInEnabled === true ? 'on' : u.gpsClockInEnabled === false ? 'off' : 'inherit'}
-                    disabled={busyUserId === u.id}
-                    onChange={(e) => changeGpsSetting(u.id, e.target.value as 'inherit' | 'on' | 'off')}
-                  >
-                    <option value="inherit">Suit le réglage entreprise</option>
-                    <option value="on">Activé (surcharge)</option>
-                    <option value="off">Désactivé (surcharge)</option>
-                  </select>
-                </td>
+                {(['mobileClockInEnabled', 'gpsClockInEnabled'] as const).map((key) => (
+                  <td key={key} style={styles.td}>
+                    <select
+                      style={styles.inlineSelect}
+                      value={u[key] === true ? 'on' : u[key] === false ? 'off' : 'inherit'}
+                      disabled={busyUserId === u.id}
+                      onChange={(e) => changeClockInSetting(u.id, key, e.target.value as 'inherit' | 'on' | 'off')}
+                    >
+                      <option value="inherit">Suit le réglage entreprise</option>
+                      <option value="on">Activé (surcharge)</option>
+                      <option value="off">Désactivé (surcharge)</option>
+                    </select>
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>

@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { MOBILE_CLOCK_IN_DISABLED_MESSAGE } from './clock-in-settings';
 import { ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantScopeGuard } from '../auth/tenant-scope.guard';
@@ -35,8 +36,19 @@ export class UsersController {
   // aucun conflit avec @Get(':id') ci-dessous, quel que soit l'ordre.
   @Get('me/rotating-qr')
   async getMyRotatingQr(@CurrentUser() user: AuthenticatedUser) {
+    // Pas de QR à afficher si le pointage mobile est coupé (décision #35).
+    const settings = await this.usersService.getClockInSettings(user.companyId, user.userId);
+    if (!settings.mobileClockInEnabled) {
+      throw new ForbiddenException(MOBILE_CLOCK_IN_DISABLED_MESSAGE);
+    }
     const { code, validUntil } = await this.rotatingQrService.generateCode(user.userId);
     return { payload: JSON.stringify({ userId: user.userId, code }), validUntil };
+  }
+
+  // Réglages de pointage résolus de l'appelant (onglet Pointage, GPS).
+  @Get('me/clock-in-settings')
+  getMyClockInSettings(@CurrentUser() user: AuthenticatedUser) {
+    return this.usersService.getClockInSettings(user.companyId, user.userId);
   }
 
   // Le PIN tablette de l'appelant (affiché dans son profil checkin-mobile).

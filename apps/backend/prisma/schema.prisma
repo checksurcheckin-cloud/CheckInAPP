@@ -76,6 +76,10 @@ model Company {
   // Réglage par défaut pour toute l'entreprise — surchargeable par employé
   // via User.gpsClockInEnabled (voir TimeEntriesService).
   gpsClockInEnabled Boolean @default(true) @map("gps_clock_in_enabled")
+  // Pointage depuis l'app mobile (QR rotatif + GPS) — désactivé, l'onglet
+  // Pointage disparaît de checkin-mobile (décision #35). Surchargeable par
+  // employé via User.mobileClockInEnabled.
+  mobileClockInEnabled Boolean @default(true) @map("mobile_clock_in_enabled")
   createdAt DateTime @default(now()) @map("created_at")
 
   sites     Site[]
@@ -135,6 +139,8 @@ model User {
   // Surcharge individuelle du réglage entreprise (Company.gpsClockInEnabled) —
   // null = hérite du réglage entreprise, true/false = override explicite.
   gpsClockInEnabled Boolean? @map("gps_clock_in_enabled")
+  // Même principe pour le pointage depuis l'app mobile (Company.mobileClockInEnabled).
+  mobileClockInEnabled Boolean? @map("mobile_clock_in_enabled")
   createdAt    DateTime   @default(now()) @map("created_at")
 
   timeEntries         TimeEntry[]       @relation("UserTimeEntries")

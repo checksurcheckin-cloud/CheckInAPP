@@ -9,6 +9,11 @@ export class UpdateUserSettingsDto {
   @IsBoolean()
   gpsClockInEnabled?: boolean | null;
 
+  // Même sémantique pour le pointage depuis l'app mobile (décision #35).
+  @IsOptional()
+  @IsBoolean()
+  mobileClockInEnabled?: boolean | null;
+
   @IsOptional()
   @IsUUID()
   siteId?: string | null;

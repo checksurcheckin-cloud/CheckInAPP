@@ -474,7 +474,8 @@ Cible : PME de 20-100 employés par site.
     - **checkin-pos n'y participe pas** : c'est un terminal mono-tâche
       (pointage), sans écran multi-viewer à tenir à jour en direct.
     - Événements volontairement grossiers — `shifts:changed`,
-      `time-entries:changed`, `availabilities:changed` — sans payload
+      `time-entries:changed`, `availabilities:changed`, `settings:changed`
+      (réglages de pointage, décision #35) — sans payload
       exploitable (`{}`). Chaque écran réagit en rappelant sa fonction
       `load()` existante (le même chemin que le pull-to-refresh) plutôt que
       de fusionner un état partiel : plus simple, et chaque écran consomme
@@ -855,6 +856,34 @@ Cible : PME de 20-100 employés par site.
       semaine », décision #18), la récurrence reste pour les autres semaines.
     - Non → rien n'est envoyé. Aucun changement backend : `ensureAvailable`
       revérifie toujours à la candidature et à l'assignation.
+
+35. **Pointage depuis l'app mobile désactivable, à deux niveaux comme le GPS
+    (décision #9) — désactivé, l'onglet Pointage disparaît et le Planning
+    devient l'écran d'accueil de checkin-mobile.**
+    - `Company.mobileClockInEnabled` (défaut `true`) + `User.mobileClockInEnabled`
+      nullable (surcharge, `null` = hérite). Résolution unique dans
+      `users/clock-in-settings.ts` (`resolveClockInSettings`) : surcharge >
+      entreprise, et **le GPS n'est jamais actif sans pointage mobile**
+      (`gpsClockInEnabled` résolu = mobile && gps).
+    - Appliqué côté backend, pas seulement masqué : 403 sur
+      `GET /users/me/rotating-qr` (plus de QR à afficher), sur
+      `POST /time-entries/scan-rotating-qr` (la tablette refuse le QR d'un
+      employé dont le pointage mobile est coupé) et sur tout
+      `POST /time-entries/self`. **PIN et badge sur la tablette restent
+      toujours ouverts** — ce sont les filets de sécurité (décision #2).
+    - checkin-mobile : `GET /users/me/clock-in-settings` chargé au démarrage
+      (`ClockInSettingsProvider`), rechargé au retour au premier plan et sur
+      l'événement websocket `settings:changed` (émis par
+      `CompaniesService.updateSettings` et `UsersService.updateSettings` quand
+      un réglage de pointage change). Pointage mobile coupé : pas d'onglet
+      `ClockIn`, `initialRouteName: 'Planning'`, et `FloatingTabBar` retire le
+      bouton central. GPS coupé : la section « Autres méthodes de pointage »
+      (le GPS) n'est plus affichée du tout. Échec du premier chargement →
+      app complète par défaut (le backend reste l'arbitre).
+    - web-manager : deux interrupteurs dans Réglages (`SettingsPage`,
+      `updateCompanySettings` accepte maintenant des champs partiels) et une
+      colonne « Pointage mobile » à côté de « Pointage GPS » dans Équipe
+      (même sélecteur tri-state hériter/activé/désactivé).
 
 ## Stack
 

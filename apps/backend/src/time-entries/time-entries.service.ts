@@ -3,6 +3,11 @@ import { TimeEntrySource, TimeEntryType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from '../users/users.service';
 import { RotatingQrService } from '../users/rotating-qr.service';
+import {
+  CLOCK_IN_SETTINGS_SELECT,
+  MOBILE_CLOCK_IN_DISABLED_MESSAGE,
+  resolveClockInSettings,
+} from '../users/clock-in-settings';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { AuthenticatedUser } from '../auth/current-user.decorator';
 import { AuthenticatedDevice } from '../site-devices/current-device.decorator';
@@ -60,10 +65,15 @@ export class TimeEntriesService {
     // que ce soit dessus.
     const user = await this.prisma.user.findFirst({
       where: { id: userId, companyId: device.companyId },
-      select: { id: true, firstName: true, lastName: true },
+      select: { id: true, firstName: true, lastName: true, ...CLOCK_IN_SETTINGS_SELECT },
     });
     if (!user) {
       throw new UnauthorizedException('Code QR invalide');
+    }
+    // Le QR rotatif est affiché par l'app mobile : pointage mobile coupé =>
+    // ce chemin aussi (décision #35). PIN et badge restent ouverts.
+    if (!resolveClockInSettings(user).mobileClockInEnabled) {
+      throw new ForbiddenException(MOBILE_CLOCK_IN_DISABLED_MESSAGE);
     }
 
     const isValid = await this.rotatingQrService.verifyCode(user.id, code);
@@ -89,9 +99,7 @@ export class TimeEntriesService {
   }
 
   async createSelf(user: AuthenticatedUser, dto: CreateSelfTimeEntryDto) {
-    if (dto.source === 'gps') {
-      await this.ensureGpsClockInAllowed(user.userId);
-    }
+    await this.ensureSelfClockInAllowed(user.userId, dto.source);
 
     let siteId: string;
     let deviceId: string | undefined;
@@ -333,15 +341,20 @@ export class TimeEntriesService {
     return last?.type === 'clock_in' ? 'clock_out' : 'clock_in';
   }
 
-  // User.gpsClockInEnabled (surcharge individuelle) prime sur
-  // Company.gpsClockInEnabled (réglage par défaut) quand il est renseigné.
-  private async ensureGpsClockInAllowed(userId: string) {
+  // Tout auto-pointage passe par l'app mobile : refusé si le pointage mobile
+  // est coupé (décision #35), et le GPS a en plus son propre réglage
+  // (décision #9). Surcharge individuelle > réglage entreprise, voir
+  // resolveClockInSettings.
+  private async ensureSelfClockInAllowed(userId: string, source: CreateSelfTimeEntryDto['source']) {
     const requester = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { gpsClockInEnabled: true, company: { select: { gpsClockInEnabled: true } } },
+      select: CLOCK_IN_SETTINGS_SELECT,
     });
-    const enabled = requester?.gpsClockInEnabled ?? requester?.company.gpsClockInEnabled ?? true;
-    if (!enabled) {
+    const settings = resolveClockInSettings(requester);
+    if (!settings.mobileClockInEnabled) {
+      throw new ForbiddenException(MOBILE_CLOCK_IN_DISABLED_MESSAGE);
+    }
+    if (source === 'gps' && !settings.gpsClockInEnabled) {
       throw new ForbiddenException("Le pointage GPS n'est pas autorisé pour cet utilisateur");
     }
   }

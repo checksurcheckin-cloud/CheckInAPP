@@ -1,4 +1,5 @@
 import type {
+  ClockInSettings,
   AuthResponse,
   Availability,
   Company,
@@ -174,8 +175,9 @@ export class ApiClient {
     return this.request<Company>('GET', '/companies/me');
   }
 
-  // Réglage GPS par défaut de l'entreprise (admin uniquement).
-  updateCompanySettings(payload: { gpsClockInEnabled: boolean }) {
+  // Réglages de pointage par défaut de l'entreprise (admin uniquement) — un
+  // champ omis reste inchangé.
+  updateCompanySettings(payload: { gpsClockInEnabled?: boolean; mobileClockInEnabled?: boolean }) {
     return this.request<Company>('PATCH', '/companies/me/settings', payload);
   }
 
@@ -264,7 +266,10 @@ export class ApiClient {
   // `gpsClockInEnabled: null` remet l'employé sur le réglage entreprise par
   // défaut, `siteId: null` le désassigne de tout site (redevient visible
   // partout, voir décision #25). Un champ omis reste inchangé côté backend.
-  updateUserSettings(userId: string, payload: { gpsClockInEnabled?: boolean | null; siteId?: string | null }) {
+  updateUserSettings(
+    userId: string,
+    payload: { gpsClockInEnabled?: boolean | null; mobileClockInEnabled?: boolean | null; siteId?: string | null },
+  ) {
     return this.request<User>('PATCH', `/users/${userId}/settings`, payload);
   }
 
@@ -283,6 +288,12 @@ export class ApiClient {
       geoLat,
       geoLng,
     });
+  }
+
+  // Réglages de pointage résolus de l'utilisateur connecté — checkin-mobile
+  // masque l'onglet Pointage / le GPS en conséquence.
+  getMyClockInSettings() {
+    return this.request<ClockInSettings>('GET', '/users/me/clock-in-settings');
   }
 
   // Génère le QR rotatif de l'employé connecté (nouveau modèle : c'est la

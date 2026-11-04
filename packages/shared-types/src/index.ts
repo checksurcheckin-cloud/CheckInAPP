@@ -35,7 +35,17 @@ export interface Company {
   name: string;
   plan: string;
   gpsClockInEnabled: boolean;
+  // Pointage depuis l'app mobile (QR rotatif + GPS) — désactivé, l'onglet
+  // Pointage disparaît de checkin-mobile.
+  mobileClockInEnabled: boolean;
   createdAt: string;
+}
+
+// Réglages de pointage résolus pour l'utilisateur connecté (surcharge
+// individuelle > réglage entreprise ; GPS jamais actif sans pointage mobile).
+export interface ClockInSettings {
+  mobileClockInEnabled: boolean;
+  gpsClockInEnabled: boolean;
 }
 
 export interface Site {
@@ -59,6 +69,8 @@ export interface User {
   // null = suit le réglage entreprise par défaut (Company.gpsClockInEnabled),
   // true/false = surcharge individuelle explicite.
   gpsClockInEnabled?: boolean | null;
+  // Même principe pour le pointage depuis l'app mobile.
+  mobileClockInEnabled?: boolean | null;
   // Site de rattachement, optionnel — null = pas encore assigné, reste
   // visible sur tous les sites de la grille planning (voir CLAUDE.md
   // décision #25).

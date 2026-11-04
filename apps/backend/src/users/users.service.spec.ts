@@ -231,7 +231,25 @@ describe('UsersService', () => {
     await service.updateSettings('company-a', 'user-1', { gpsClockInEnabled: true });
 
     expect(prisma.shiftAssignment.updateMany).not.toHaveBeenCalled();
-    expect(realtime.emitToCompany).not.toHaveBeenCalled();
+    // Seul l'événement de réglages part (l'app mobile ré-affiche Pointage/GPS).
+    expect(realtime.emitToCompany).toHaveBeenCalledTimes(1);
+    expect(realtime.emitToCompany).toHaveBeenCalledWith('company-a', 'settings:changed');
+  });
+
+  it('resolves clock-in settings scoped to the company, user override first, gps off when mobile is off', async () => {
+    prisma.user.findFirst.mockResolvedValueOnce({
+      gpsClockInEnabled: null,
+      mobileClockInEnabled: false,
+      company: { gpsClockInEnabled: true, mobileClockInEnabled: true },
+    });
+
+    await expect(service.getClockInSettings('company-a', 'user-1')).resolves.toEqual({
+      mobileClockInEnabled: false,
+      gpsClockInEnabled: false,
+    });
+    expect(prisma.user.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'user-1', companyId: 'company-a' } }),
+    );
   });
 
   it('rejects invite() when the email is already used, even across companies', async () => {

@@ -12,6 +12,7 @@ import { ConfirmationBanner } from '../components/ConfirmationBanner';
 import { PersonalQrCode } from '../components/PersonalQrCode';
 import { PinFallbackNotice } from '../components/PinFallbackNotice';
 import { withPressedFeedback } from '../lib/pressedStyle';
+import { useClockInSettings } from '../services/ClockInSettings';
 
 const ACTIONS: { type: TimeEntryType; label: string }[] = [
   { type: 'clock_in', label: 'Arrivée' },
@@ -33,6 +34,9 @@ function initials(firstName?: string, lastName?: string) {
 
 export function ClockInScreen() {
   const { user } = useAuth();
+  // GPS désactivé (entreprise ou surcharge employé, décision #9) : l'option
+  // n'apparaît pas du tout, plutôt que d'échouer en 403 au moment de pointer.
+  const gpsEnabled = useClockInSettings()?.gpsClockInEnabled ?? false;
   const [sites, setSites] = useState<Site[]>([]);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   const [lastEntry, setLastEntry] = useState<TimeEntry | null>(null);
@@ -137,12 +141,14 @@ export function ClockInScreen() {
 
       {banner ? <ConfirmationBanner kind={banner.kind} message={banner.message} onHide={() => setBanner(null)} /> : null}
 
-      <Pressable onPress={() => setShowOtherMethods((v) => !v)} style={styles.otherMethodsToggle}>
-        <Text style={styles.otherMethodsText}>Autres méthodes de pointage</Text>
-        <Ionicons name={showOtherMethods ? 'chevron-up' : 'chevron-down'} size={15} color={colors.textSecondary} />
-      </Pressable>
+      {gpsEnabled ? (
+        <Pressable onPress={() => setShowOtherMethods((v) => !v)} style={styles.otherMethodsToggle}>
+          <Text style={styles.otherMethodsText}>Autres méthodes de pointage</Text>
+          <Ionicons name={showOtherMethods ? 'chevron-up' : 'chevron-down'} size={15} color={colors.textSecondary} />
+        </Pressable>
+      ) : null}
 
-      {showOtherMethods ? (
+      {gpsEnabled && showOtherMethods ? (
         <View style={styles.otherMethodsPanel}>
           {lastEntry ? (
             <Text style={styles.status}>

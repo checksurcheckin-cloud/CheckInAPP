@@ -9,6 +9,7 @@ import { Sora_600SemiBold, Sora_700Bold } from '@expo-google-fonts/sora';
 import { colors } from '@horaires/ui-tokens';
 import { AuthProvider, useAuth } from './src/services/AuthService';
 import { FloatingTabBar } from './src/components/FloatingTabBar';
+import { ClockInSettingsProvider, useClockInSettings } from './src/services/ClockInSettings';
 
 // Écrans partagés (staff + manager)
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -75,19 +76,46 @@ function RootNavigator() {
       {!user ? (
         <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
       ) : (
-        <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
+        <Stack.Screen name="Main" component={MainWithSettings} options={{ headerShown: false }} />
       )}
     </Stack.Navigator>
   );
 }
 
+function MainWithSettings() {
+  return (
+    <ClockInSettingsProvider>
+      <MainTabs />
+    </ClockInSettingsProvider>
+  );
+}
+
+// Pointage depuis l'app désactivé (réglage entreprise ou surcharge employé,
+// décision #35) : pas d'onglet Pointage, et le Planning devient l'écran
+// d'accueil. La `key` remonte le navigateur quand le réglage bascule, pour
+// repartir sur le bon écran d'accueil.
 function MainTabs() {
+  const settings = useClockInSettings();
+
+  if (!settings) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  const mobileClockIn = settings.mobileClockInEnabled;
   return (
     <Tab.Navigator
+      key={mobileClockIn ? 'with-clock-in' : 'planning-home'}
+      initialRouteName={mobileClockIn ? 'ClockIn' : 'Planning'}
       tabBar={(props) => <FloatingTabBar {...props} />}
       screenOptions={{ headerShown: false }}
     >
-      <Tab.Screen name="ClockIn" component={ClockInScreen} options={{ title: 'Pointage' }} />
+      {mobileClockIn ? (
+        <Tab.Screen name="ClockIn" component={ClockInScreen} options={{ title: 'Pointage' }} />
+      ) : null}
       <Tab.Screen name="Planning" component={PlanningScreen} options={{ title: 'Planning' }} />
       <Tab.Screen
         name="ShiftMarketplace"

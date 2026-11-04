@@ -62,7 +62,7 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
   return (
     <View style={styles.bar}>
       <View style={styles.sideGroup}>{left.map(renderItem)}</View>
-      <View style={styles.gap} />
+      {fabIndex >= 0 ? <View style={styles.gap} /> : null}
       <View style={styles.sideGroup}>{right.map(renderItem)}</View>
 
       {fabRoute ? (
@@ -80,7 +80,9 @@ export function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarP
           <Ionicons name="qr-code-outline" size={26} color={colors.surface} />
         </Pressable>
       ) : null}
-      <Text style={styles.fabLabel}>Pointer</Text>
+      {/* Sans onglet Pointage (pointage mobile désactivé, décision #35) :
+          ni bouton central ni espace réservé, les onglets se répartissent. */}
+      {fabRoute ? <Text style={styles.fabLabel}>Pointer</Text> : null}
     </View>
   );
 }

@@ -135,7 +135,7 @@ export function ClockInScreen() {
         </Pressable>
       )}
 
-      {banner ? <ConfirmationBanner kind={banner.kind} message={banner.message} /> : null}
+      {banner ? <ConfirmationBanner kind={banner.kind} message={banner.message} onHide={() => setBanner(null)} /> : null}
 
       <Pressable onPress={() => setShowOtherMethods((v) => !v)} style={styles.otherMethodsToggle}>
         <Text style={styles.otherMethodsText}>Autres méthodes de pointage</Text>

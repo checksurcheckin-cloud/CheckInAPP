@@ -419,7 +419,7 @@ export function AvailabilitiesScreen() {
         </Pressable>
       </View>
 
-      {banner ? <ConfirmationBanner kind={banner.kind} message={banner.message} /> : null}
+      {banner ? <ConfirmationBanner kind={banner.kind} message={banner.message} onHide={() => setBanner(null)} /> : null}
 
       <ScrollView
         contentContainerStyle={styles.list}
@@ -453,7 +453,12 @@ export function AvailabilitiesScreen() {
             >
               <View style={styles.dayRow}>
                 <View>
-                  <Text style={styles.dayName}>{label}</Text>
+                  <Text style={styles.dayName}>
+                    {label}{' '}
+                    <Text style={styles.dayDate}>
+                      {weekDates[day].toLocaleDateString('fr-BE', { day: 'numeric', month: 'short' }).replace('.', '')}
+                    </Text>
+                  </Text>
                   <Pressable
                     style={styles.toggle}
                     disabled={busy || past}
@@ -659,6 +664,7 @@ const styles = StyleSheet.create({
 
   dayRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   dayName: { fontFamily: fonts.displaySemiBold, fontSize: 14.5, color: colors.textPrimary, marginBottom: 8 },
+  dayDate: { fontFamily: fonts.bodyMedium, fontSize: 13, color: colors.textSecondary },
 
   toggle: { alignSelf: 'flex-start' },
   toggleTrack: { width: 40, height: 23, borderRadius: 12, backgroundColor: colors.border, justifyContent: 'center' },

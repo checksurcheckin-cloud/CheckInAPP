@@ -831,6 +831,13 @@ Cible : PME de 20-100 employés par site.
       plus partie. Refusé (409) sur un shift déjà pourvu ou terminé
       (décision #32). Émet `shifts:changed`. Les échanges (`kind: 'swap'`)
       ne sont pas concernés.
+    - **Jamais proposé à quelqu'un qui travaille déjà à ce moment-là** (tous
+      sites confondus, même chevauchement strict qu'`ensureNoOverlap`) :
+      `listOpenOffers` retire du marché de l'appelant toute entrée — créneau
+      libre comme échange — qui chevauche une de ses assignations actives ;
+      `MarketProposalDialog` masque ces employés de la liste « Employés
+      spécifiques » (calcul client via `GET /shifts` sur la fenêtre du
+      créneau, tous sites) et les retire de la sélection envoyée.
 
 ## Stack
 

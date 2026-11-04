@@ -1091,6 +1091,20 @@ describe('ShiftsService', () => {
       ]);
     });
 
+    it('hides slots overlapping a shift the requester already works', async () => {
+      prisma.shiftOffer.findMany.mockResolvedValue([]);
+      prisma.user.findFirst.mockResolvedValue({ siteId: 'site-ixelles' });
+      prisma.shift.findMany.mockResolvedValue([{ ...openShift, applications: [] }]);
+      prisma.shiftAssignment.findMany.mockResolvedValue([
+        { shiftId: 'own-shift', shift: { startsAt: OPEN_START, endsAt: OPEN_END } },
+      ]);
+
+      await expect(service.listOpenOffers('company-a', 'user-1')).resolves.toEqual([]);
+      expect(prisma.shiftAssignment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ userId: 'user-1', status: { not: 'cancelled' } }) }),
+      );
+    });
+
     it('records an application after checking availability and overlaps', async () => {
       prisma.shift.findFirst.mockResolvedValue({ ...openShift, site: { timezone: 'Europe/Brussels' } });
       prisma.user.findFirst.mockResolvedValue({ siteId: 'site-ixelles' });

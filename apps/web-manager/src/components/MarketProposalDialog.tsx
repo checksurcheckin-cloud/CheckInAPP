@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { MarketScope, ProposeShiftOnMarketPayload, Shift, Site, User } from '@horaires/shared-types';
+import { apiClient } from '../services/AuthService';
 
 type Props = {
   shift: Shift | null;
@@ -22,6 +23,33 @@ export function MarketProposalDialog({ shift, sites, users, onClose, onSave }: P
   const [query, setQuery] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Employés qui travaillent déjà pendant ce créneau, tous sites confondus —
+  // on ne leur propose pas un second shift au même moment (le marché les
+  // filtre aussi côté backend, listOpenOffers).
+  const [busyUserIds, setBusyUserIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!shift) return;
+    let cancelled = false;
+    setBusyUserIds(new Set());
+    const start = new Date(shift.startsAt);
+    const end = new Date(shift.endsAt);
+    // `from`/`to` filtrent sur l'heure de début : on remonte d'un jour pour
+    // attraper un shift de nuit commencé la veille.
+    apiClient
+      .getShifts({ from: new Date(start.getTime() - 86400000).toISOString(), to: end.toISOString() })
+      .then((list) => {
+        if (cancelled) return;
+        const ids = list
+          .filter((s) => s.id !== shift.id && new Date(s.startsAt) < end && new Date(s.endsAt) > start)
+          .flatMap((s) => (s.assignments ?? []).filter((a) => a.status !== 'cancelled').map((a) => a.userId));
+        setBusyUserIds(new Set(ids));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [shift]);
 
   useEffect(() => {
     if (!shift) return;
@@ -40,15 +68,20 @@ export function MarketProposalDialog({ shift, sites, users, onClose, onSave }: P
         .sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`)),
     [users],
   );
-  const visibleEmployees = employees.filter((u) =>
+  const freeEmployees = employees.filter((u) => !busyUserIds.has(u.id));
+  const hiddenCount = employees.length - freeEmployees.length;
+  const visibleEmployees = freeEmployees.filter((u) =>
     `${u.firstName} ${u.lastName}`.toLowerCase().includes(query.trim().toLowerCase()),
   );
+  // Un employé choisi avant d'avoir pris un autre shift sur ce créneau n'est
+  // plus proposable : il sort de la sélection envoyée.
+  const selectedUserIds = userIds.filter((id) => !busyUserIds.has(id));
 
   if (!shift) return null;
 
   const shiftSiteName = siteName.get(shift.siteId) ?? 'son magasin';
   const canSave =
-    !isSaving && (scope === 'sites' ? siteIds.length > 0 : scope === 'employees' ? userIds.length > 0 : true);
+    !isSaving && (scope === 'sites' ? siteIds.length > 0 : scope === 'employees' ? selectedUserIds.length > 0 : true);
 
   const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
@@ -59,7 +92,7 @@ export function MarketProposalDialog({ shift, sites, users, onClose, onSave }: P
       await onSave(shift.id, {
         scope,
         ...(scope === 'sites' ? { siteIds } : {}),
-        ...(scope === 'employees' ? { userIds } : {}),
+        ...(scope === 'employees' ? { userIds: selectedUserIds } : {}),
       });
       onClose();
     } catch (err) {
@@ -152,7 +185,12 @@ export function MarketProposalDialog({ shift, sites, users, onClose, onSave }: P
               {visibleEmployees.length === 0 ? <p style={styles.pickMeta}>Aucun employé trouvé</p> : null}
             </div>
             <p style={styles.pickMeta}>
-              {userIds.length} employé{userIds.length > 1 ? 's' : ''} sélectionné{userIds.length > 1 ? 's' : ''}
+              {`${selectedUserIds.length} employé${selectedUserIds.length > 1 ? 's' : ''} sélectionné${
+                selectedUserIds.length > 1 ? 's' : ''
+              }`}
+              {hiddenCount > 0
+                ? ` · ${hiddenCount} masqué${hiddenCount > 1 ? 's' : ''} (déjà en shift sur ce créneau)`
+                : ''}
             </p>
           </>
         ) : null}

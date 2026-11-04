@@ -156,7 +156,19 @@ export class ShiftsService {
         hasApplied: applications.length > 0,
       })),
     ];
-    return entries.sort((a, b) => a.shift.startsAt.getTime() - b.shift.startsAt.getTime());
+    // On ne propose pas un créneau à quelqu'un qui travaille déjà à ce
+    // moment-là (même règle de chevauchement qu'ensureNoOverlap, tous sites
+    // confondus) : il ne pourrait de toute façon pas candidater.
+    const busy = await this.prisma.shiftAssignment.findMany({
+      where: { userId: requesterId, status: { not: 'cancelled' }, shift: { endsAt: { gt: new Date() } } },
+      select: { shiftId: true, shift: { select: { startsAt: true, endsAt: true } } },
+    });
+    const isBusyDuring = (shiftId: string, startsAt: Date, endsAt: Date) =>
+      busy.some((b) => b.shiftId !== shiftId && b.shift.startsAt < endsAt && b.shift.endsAt > startsAt);
+
+    return entries
+      .filter((e) => !isBusyDuring(e.shiftId, e.shift.startsAt, e.shift.endsAt))
+      .sort((a, b) => a.shift.startsAt.getTime() - b.shift.startsAt.getTime());
   }
 
   // Le pendant côté manager : toutes les offres encore ouvertes de

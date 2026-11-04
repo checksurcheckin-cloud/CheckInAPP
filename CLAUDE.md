@@ -776,6 +776,33 @@ Cible : PME de 20-100 employés par site.
       garde tous ses droits via l'API, c'est seulement l'app mobile qui ne
       les expose plus.
 
+32. **Shift terminé = verrouillé : ni création, ni assignation, ni
+    modification, ni suppression, ni échange.** Règle appliquée côté
+    backend (`ensureNotEnded` dans `ShiftsService`, 409, heure serveur —
+    décision #4) et reflétée à l'écran. Le critère est l'heure de **fin**,
+    pas de début : un shift **en cours** reste assignable (remplacement de
+    dernière minute d'un malade à 8h05 sur un 8h-16h).
+    - Bloqués : `create` (créneau déjà terminé, ex. modèle déposé sur un
+      jour passé), `update` (shift déjà terminé, OU déplacé vers un créneau
+      terminé — publication comprise), `remove`, `assign` (donc aussi
+      `approveOpenShift`), `offerAssignment`, `acceptOffer`, `approveOffer`.
+    - **Restent permis** : `rejectOffer` (seul moyen de nettoyer une offre
+      d'échange restée ouverte sur un shift passé) ; le marché employé
+      (`listOpenOffers`) n'affiche plus les échanges sur un shift terminé.
+    - Pourquoi : un shift passé est l'historique confronté aux pointages
+      réels ; la régularisation d'un travail non planifié passe par un
+      pointage `manual_by_manager` (tracé, motif obligatoire), jamais par
+      une réécriture du planning. Supprimer un shift terminé est aussi
+      interdit (choix produit explicite), même pour corriger une ancienne
+      erreur de saisie.
+    - web-manager : `ShiftCard` d'un shift terminé = estompée, étiquette
+      « Terminé » (cadenas), non glissable, sans actions ni sélecteur ;
+      `PlanningGridCell` grise les jours écoulés et refuse la dépose si le
+      créneau glissé serait déjà terminé à cette date ; « Publier N
+      brouillons » ignore les brouillons terminés (`isEnded`,
+      `lib/date.ts`). checkin-mobile : « Mes échanges » ne propose plus un
+      shift terminé.
+
 ## Stack
 
 - Backend : NestJS + PostgreSQL + Prisma + Passport/JWT

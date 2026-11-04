@@ -54,8 +54,11 @@ export function ShiftMarketplaceScreen() {
 
     // "Mes échanges" : mes propres shifts encore assignés, que je peux
     // proposer. getShifts ne renvoie que mes shifts, d'où le scan local.
+    // Un shift terminé ne se propose plus (refusé par l'API, décision #32).
     const mine: OwnAssignment[] = [];
+    const now = Date.now();
     for (const shift of shifts) {
+      if (new Date(shift.endsAt).getTime() <= now) continue;
       for (const assignment of shift.assignments ?? []) {
         if (assignment.userId === user?.id && assignment.status === 'assigned') {
           mine.push({ kind: 'own', id: assignment.id, shift, assignment });

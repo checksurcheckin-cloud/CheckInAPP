@@ -78,3 +78,9 @@ export function fractionOfDay(time: string): number {
   const [h, m] = time.split(':').map(Number);
   return (h * 60 + m) / (24 * 60);
 }
+
+// Un shift dont l'heure de fin est passée est verrouillé (ni assignation, ni
+// déplacement, ni suppression) — miroir de la règle backend, décision #32.
+export function isEnded(endsAt: string | Date, now: number = Date.now()): boolean {
+  return new Date(endsAt).getTime() <= now;
+}

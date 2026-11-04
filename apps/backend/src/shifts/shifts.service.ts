@@ -26,6 +26,7 @@ export class ShiftsService {
     if (endsAt <= startsAt) {
       throw new BadRequestException("L'heure de fin doit être après l'heure de début");
     }
+    ensureNotEnded(endsAt, 'Impossible de créer un shift déjà terminé');
 
     const shift = await this.prisma.shift.create({
       data: {
@@ -115,7 +116,7 @@ export class ShiftsService {
       where: {
         status: 'open',
         offeredBy: { not: requesterId },
-        shiftAssignment: { shift: { site: { companyId } } },
+        shiftAssignment: { shift: { site: { companyId }, endsAt: { gt: new Date() } } },
       },
       include: {
         shiftAssignment: { include: { shift: true } },
@@ -210,6 +211,7 @@ export class ShiftsService {
 
   async update(companyId: string, id: string, dto: UpdateShiftDto) {
     const existing = await this.findOne(companyId, id);
+    ensureNotEnded(existing.endsAt, 'Ce shift est terminé, il ne peut plus être modifié');
     if (dto.siteId) {
       const site = await this.prisma.site.findFirst({ where: { id: dto.siteId, companyId } });
       if (!site) {
@@ -225,6 +227,7 @@ export class ShiftsService {
     if (endsAt <= startsAt) {
       throw new BadRequestException("L'heure de fin doit être après l'heure de début");
     }
+    ensureNotEnded(endsAt, 'Impossible de déplacer un shift dans le passé');
 
     const shift = await this.prisma.shift.update({
       where: { id },
@@ -254,7 +257,10 @@ export class ShiftsService {
   // (offres -> assignations -> shift) en une transaction plutôt que de
   // planter en 500.
   async remove(companyId: string, id: string) {
-    await this.findOne(companyId, id);
+    const existing = await this.findOne(companyId, id);
+    // Un shift terminé fait partie de l'historique, confronté aux pointages
+    // réels — on ne le supprime plus (décision #32).
+    ensureNotEnded(existing.endsAt, 'Ce shift est terminé, il ne peut plus être supprimé');
 
     const assignments = await this.prisma.shiftAssignment.findMany({
       where: { shiftId: id },
@@ -276,6 +282,10 @@ export class ShiftsService {
   // Un shift = un seul employé assigné à la fois.
   async assign(companyId: string, shiftId: string, dto: AssignShiftDto) {
     const shift = await this.findOne(companyId, shiftId);
+    // Un shift en cours reste assignable (remplacement de dernière minute) ;
+    // un shift terminé non : la régularisation passe par un pointage manuel,
+    // pas par une réécriture du planning (décision #32).
+    ensureNotEnded(shift.endsAt, 'Ce shift est terminé, il ne peut plus être assigné');
 
     const activeAssignment = shift.assignments.find((a) => a.status !== 'cancelled');
     if (activeAssignment) {
@@ -321,6 +331,7 @@ export class ShiftsService {
     if (assignment.status !== 'assigned') {
       throw new BadRequestException('Ce shift ne peut pas être proposé dans son état actuel');
     }
+    ensureNotEnded(assignment.shift.endsAt, 'Ce shift est terminé, il ne peut plus être proposé');
 
     const [offer] = await this.prisma.$transaction([
       this.prisma.shiftOffer.create({
@@ -351,6 +362,7 @@ export class ShiftsService {
     if (offer.offeredBy === colleague.userId) {
       throw new ForbiddenException("Impossible d'accepter sa propre offre");
     }
+    ensureNotEnded(offer.shiftAssignment.shift.endsAt, 'Ce shift est terminé');
 
     const existing = await this.prisma.shiftOfferCandidate.findFirst({
       where: { offerId, userId: colleague.userId },
@@ -393,6 +405,9 @@ export class ShiftsService {
     if (!candidate) {
       throw new NotFoundException("Cet employé n'a pas candidaté pour cet échange");
     }
+    // rejectOffer reste possible sur un shift terminé : c'est ainsi que le
+    // manager nettoie une offre restée sans suite.
+    ensureNotEnded(offer.shiftAssignment.shift.endsAt, 'Ce shift est terminé, l\'échange ne peut plus être validé');
 
     // Re-vérifié à l'approbation : le candidat choisi a pu être assigné
     // ailleurs entre sa candidature et la validation manager.
@@ -517,6 +532,7 @@ export class ShiftsService {
   private async findOwnedAssignment(companyId: string, id: string) {
     const assignment = await this.prisma.shiftAssignment.findFirst({
       where: { id, shift: { site: { companyId } } },
+      include: { shift: true },
     });
     if (!assignment) {
       throw new NotFoundException('Assignation introuvable');
@@ -710,6 +726,14 @@ function zonedParts(
 
 // Un shift « libre » au sens du marché : publié (un brouillon n'est visible
 // de personne, décision #15), à venir, et sans aucune assignation active.
+// Règle commune "shift terminé = verrouillé" (décision #32) : l'heure de fin
+// est comparée à l'heure serveur, jamais à celle du client (décision #4).
+function ensureNotEnded(endsAt: Date, message: string) {
+  if (endsAt.getTime() <= Date.now()) {
+    throw new ConflictException(message);
+  }
+}
+
 function openShiftWhere(companyId: string) {
   return {
     site: { companyId },

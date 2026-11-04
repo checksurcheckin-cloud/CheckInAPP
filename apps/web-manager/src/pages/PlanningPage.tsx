@@ -30,6 +30,7 @@ import {
   combineDateAndTime,
   formatDurationLabel,
   toHHmm,
+  isEnded,
   WEEKDAY_LABELS_FR,
 } from '../lib/date';
 import { assignInheritedShiftColor, resolveShiftColors } from '../lib/shiftColor';
@@ -360,7 +361,9 @@ export function PlanningPage() {
   // seulement ceux du jour affiché en scope "Jour") — le workflow visé est
   // "on construit toute la semaine en brouillon, puis on publie le tout".
   const publishAllDrafts = async () => {
-    const draftIds = shifts.filter((s) => s.status === 'draft').map((s) => s.id);
+    // Un brouillon déjà terminé ne se publie plus (décision #32) : il est exclu
+    // du lot plutôt que de faire échouer toute la publication.
+    const draftIds = shifts.filter((s) => s.status === 'draft' && !isEnded(s.endsAt)).map((s) => s.id);
     setPublishConfirmOpen(false);
     if (draftIds.length === 0) return;
     setIsPublishing(true);
@@ -456,7 +459,7 @@ export function PlanningPage() {
       return total + dayTotal;
     }, 0);
 
-  const draftCount = shifts.filter((s) => s.status === 'draft').length;
+  const draftCount = shifts.filter((s) => s.status === 'draft' && !isEnded(s.endsAt)).length;
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>

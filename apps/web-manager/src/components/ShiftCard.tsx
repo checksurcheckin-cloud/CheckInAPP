@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { Copy, Send, X } from 'lucide-react';
+import { Copy, Lock, Send, X } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { Availability, Shift, User } from '@horaires/shared-types';
 import { DRAG_CURSOR, DRAG_CURSOR_ACTIVE } from '../lib/cursors';
-import { durationMinutes, formatDurationLabel } from '../lib/date';
+import { durationMinutes, formatDurationLabel, isEnded } from '../lib/date';
 import { isEmployeeAvailableForShift } from '../lib/availability';
 
 type Props = {
@@ -53,6 +53,9 @@ export function ShiftCard({
 }: Props) {
   const hasAssignment = (shift.assignments ?? []).length > 0;
   const isDraft = shift.status === 'draft';
+  // Shift terminé = historique figé (décision #32) : plus déplaçable,
+  // assignable, publiable ni supprimable — le backend le refuserait en 409.
+  const ended = isEnded(shift.endsAt);
   const [isPressed, setIsPressed] = useState(false);
 
   // Employés déjà occupés ce jour-là (n'importe quel autre shift, assigné
@@ -77,6 +80,7 @@ export function ShiftCard({
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `shift-${shift.id}`,
     data: { type: 'shift', shiftId: shift.id, startsAt: shift.startsAt, endsAt: shift.endsAt },
+    disabled: ended,
   });
 
   // Un clic ouvre l'édition, mais seulement s'il n'y a pas eu de glisser
@@ -99,7 +103,7 @@ export function ShiftCard({
         border: isDraft ? `1.5px dashed ${colors.textSecondary}` : 'none',
         transform: `${translate} scale(${squeezed ? 0.96 : 1})`.trim(),
         transition: isDragging ? undefined : 'transform 0.15s ease',
-        opacity: isDragging ? 0.4 : 1,
+        opacity: isDragging ? 0.4 : ended ? 0.6 : 1,
         boxShadow: isDragging ? shadows.md : 'none',
         zIndex: isDragging ? 10 : undefined,
       }}
@@ -114,15 +118,22 @@ export function ShiftCard({
         }}
         onPointerUp={() => {
           setIsPressed(false);
-          if (!draggedRef.current) {
+          if (!ended && !draggedRef.current) {
             onEdit(shift);
           }
         }}
         onPointerCancel={() => setIsPressed(false)}
-        style={{ ...styles.dragHandle, cursor: squeezed ? DRAG_CURSOR_ACTIVE : DRAG_CURSOR }}
-        title="Cliquer pour modifier, glisser pour déplacer/assigner"
+        style={{ ...styles.dragHandle, cursor: ended ? 'default' : squeezed ? DRAG_CURSOR_ACTIVE : DRAG_CURSOR }}
+        title={ended ? 'Shift terminé : il ne peut plus être modifié' : 'Cliquer pour modifier, glisser pour déplacer/assigner'}
       >
-        {isDraft ? <span style={styles.draftTag}>Brouillon</span> : null}
+        {ended ? (
+          <span style={styles.draftTag}>
+            <Lock size={9} strokeWidth={2.5} style={{ marginRight: 3, verticalAlign: -1 }} />
+            Terminé
+          </span>
+        ) : isDraft ? (
+          <span style={styles.draftTag}>Brouillon</span>
+        ) : null}
         <span style={{ ...styles.time, color: palette.text }}>
           {new Date(shift.startsAt).toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' })}
           {' - '}
@@ -132,7 +143,7 @@ export function ShiftCard({
         {shift.roleNeeded ? <span style={{ ...styles.role, color: palette.text }}>{shift.roleNeeded}</span> : null}
       </div>
 
-      {!hasAssignment && assignableEmployees.length > 0 ? (
+      {!ended && !hasAssignment && assignableEmployees.length > 0 ? (
         <select
           style={styles.assignSelect}
           disabled={busy}
@@ -149,6 +160,7 @@ export function ShiftCard({
         </select>
       ) : null}
 
+      {ended ? null : (
       <div style={styles.cardActions}>
         {isDraft ? (
           <button
@@ -180,6 +192,7 @@ export function ShiftCard({
           <X size={13} strokeWidth={2} />
         </button>
       </div>
+      )}
     </div>
   );
 }

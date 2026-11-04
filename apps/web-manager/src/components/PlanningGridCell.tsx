@@ -3,7 +3,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { Ban } from 'lucide-react';
 import { colors, spacing, radius, typography } from '@horaires/ui-tokens';
 import type { Availability, Shift, User } from '@horaires/shared-types';
-import { combineDateAndTime, durationMinutesFromTimeRange, fractionOfDay } from '../lib/date';
+import { addDays, combineDateAndTime, durationMinutesFromTimeRange, fractionOfDay, isEnded } from '../lib/date';
 import { isEmployeeAvailableForShift, type UnavailabilityInfo } from '../lib/availability';
 import { ShiftCard } from './ShiftCard';
 
@@ -72,18 +72,30 @@ export function PlanningGridCell({
   // indisponibilité partielle ("à partir de 18h") n'empêche pas de déposer
   // un shift du matin. Voir isEmployeeAvailableForShift, le même calcul que
   // ShiftCard utilise pour son sélecteur d'assignation.
+  const draggedRangeHere =
+    draggedTimeRange !== null
+      ? (() => {
+          const startsAt = combineDateAndTime(date, draggedTimeRange.startTime);
+          const minutes = durationMinutesFromTimeRange(draggedTimeRange.startTime, draggedTimeRange.endTime);
+          return { startsAt, endsAt: new Date(startsAt.getTime() + minutes * 60000) };
+        })()
+      : null;
   const draggedOverlapsUnavailability =
     employeeId !== null &&
-    draggedTimeRange !== null &&
-    (() => {
-      const startsAt = combineDateAndTime(date, draggedTimeRange.startTime);
-      const minutes = durationMinutesFromTimeRange(draggedTimeRange.startTime, draggedTimeRange.endTime);
-      const endsAt = new Date(startsAt.getTime() + minutes * 60000);
-      return !isEmployeeAvailableForShift(availabilities, employeeId, startsAt, endsAt);
-    })();
+    draggedRangeHere !== null &&
+    !isEmployeeAvailableForShift(availabilities, employeeId, draggedRangeHere.startsAt, draggedRangeHere.endsAt);
+  // Déposé ici, le créneau serait déjà terminé : refusé par le backend
+  // (décision #32), donc la cellule n'est pas une cible valide. Un créneau
+  // du jour même encore en cours ou à venir reste déposable.
+  const draggedWouldBeEnded = draggedRangeHere !== null && isEnded(draggedRangeHere.endsAt);
+  // Jour entièrement écoulé : grisé, pour signaler d'emblée qu'on ne
+  // planifie plus rien dessus.
+  const isPastDay = isEnded(addDays(new Date(date.getFullYear(), date.getMonth(), date.getDate()), 1));
 
   const disabled = Boolean(
-    (blockedAssigneeId !== null && blockedAssigneeId !== employeeId) || draggedOverlapsUnavailability,
+    (blockedAssigneeId !== null && blockedAssigneeId !== employeeId) ||
+      draggedOverlapsUnavailability ||
+      draggedWouldBeEnded,
   );
 
   const { setNodeRef, isOver } = useDroppable({
@@ -94,8 +106,16 @@ export function PlanningGridCell({
 
   const showHoverTint = isOver && !disabled;
   const backgroundColor =
-    showHoverTint ? colors.primaryTint : unavailabilityInfo.kind === 'full' ? UNAVAILABLE_BG : mint ? colors.accentTint : colors.surface;
-  const backgroundImage = showHoverTint ? undefined : partialGradient(unavailabilityInfo);
+    showHoverTint
+      ? colors.primaryTint
+      : isPastDay
+      ? colors.background
+      : unavailabilityInfo.kind === 'full'
+      ? UNAVAILABLE_BG
+      : mint
+      ? colors.accentTint
+      : colors.surface;
+  const backgroundImage = showHoverTint || isPastDay ? undefined : partialGradient(unavailabilityInfo);
 
   return (
     <div

@@ -39,6 +39,18 @@ describe('ShiftsService', () => {
     $transaction: jest.Mock;
   };
 
+  // Les fixtures utilisent des dates fixes (juin-septembre 2026) : on fige
+  // l'horloge avant elles pour qu'aucun shift ne soit "terminé" (décision
+  // #32), sauf dans les tests qui avancent l'heure exprès. Seul Date est
+  // simulé, pas les timers.
+  beforeAll(() => {
+    jest.useFakeTimers({
+      now: new Date('2026-05-01T00:00:00.000Z'),
+      doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask'],
+    });
+  });
+  afterAll(() => jest.useRealTimers());
+
   beforeEach(async () => {
     prisma = {
       site: { findFirst: jest.fn() },
@@ -274,7 +286,11 @@ describe('ShiftsService', () => {
     });
 
     it('cascades through offers and assignments before deleting the shift (avoids the FK violation)', async () => {
-      prisma.shift.findFirst.mockResolvedValue({ id: 'shift-1', assignments: [] });
+      prisma.shift.findFirst.mockResolvedValue({
+        id: 'shift-1',
+        endsAt: new Date('2026-09-01T16:00:00.000Z'),
+        assignments: [],
+      });
       prisma.shiftAssignment.findMany.mockResolvedValue([{ id: 'assignment-1' }, { id: 'assignment-2' }]);
       prisma.shiftOffer.deleteMany.mockResolvedValue({ count: 0 });
       prisma.shiftAssignment.deleteMany.mockResolvedValue({ count: 2 });
@@ -615,7 +631,7 @@ describe('ShiftsService', () => {
         where: {
           status: 'open',
           offeredBy: { not: 'user-1' },
-          shiftAssignment: { shift: { site: { companyId: 'company-a' } } },
+          shiftAssignment: { shift: { site: { companyId: 'company-a' }, endsAt: { gt: new Date('2026-05-01T00:00:00.000Z') } } },
         },
         include: {
           shiftAssignment: { include: { shift: true } },
@@ -718,6 +734,7 @@ describe('ShiftsService', () => {
         id: 'assignment-1',
         userId: 'user-1',
         status: 'assigned',
+        shift: { endsAt: new Date('2026-09-01T16:00:00.000Z') },
       });
       prisma.shiftOffer.create.mockResolvedValue({ id: 'offer-1', status: 'open' });
       prisma.shiftAssignment.update.mockResolvedValue({ id: 'assignment-1', status: 'offered' });
@@ -1160,6 +1177,71 @@ describe('ShiftsService', () => {
 
       expect(prisma.shiftApplication.deleteMany).toHaveBeenCalledWith({ where: { shiftId: 'open-1' } });
       expect(prisma.shiftAssignment.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('ended shifts are locked (décision #32)', () => {
+    const endedShift = {
+      id: 'shift-old',
+      siteId: 'site-1',
+      startsAt: new Date('2026-04-01T08:00:00.000Z'),
+      endsAt: new Date('2026-04-01T16:00:00.000Z'),
+      assignments: [],
+    };
+
+    it('refuses to assign an ended shift', async () => {
+      prisma.shift.findFirst.mockResolvedValue(endedShift);
+      await expect(service.assign('company-a', 'shift-old', { userId: 'user-1' })).rejects.toThrow(ConflictException);
+      expect(prisma.shiftAssignment.create).not.toHaveBeenCalled();
+    });
+
+    it('still assigns a shift that has started but not ended (last-minute replacement)', async () => {
+      prisma.shift.findFirst.mockResolvedValue({
+        ...endedShift,
+        startsAt: new Date('2026-04-30T20:00:00.000Z'),
+        endsAt: new Date('2026-05-01T04:00:00.000Z'),
+      });
+      prisma.user.findFirst.mockResolvedValue({ id: 'user-1' });
+      prisma.site.findFirst.mockResolvedValue({ timezone: 'Europe/Brussels' });
+      prisma.availability.findFirst.mockResolvedValue(null);
+      prisma.shiftAssignment.findFirst.mockResolvedValue(null);
+      prisma.shiftAssignment.create.mockResolvedValue({ id: 'assignment-1' });
+
+      await expect(service.assign('company-a', 'shift-old', { userId: 'user-1' })).resolves.toEqual({ id: 'assignment-1' });
+    });
+
+    it('refuses to create a shift that is already over', async () => {
+      prisma.site.findFirst.mockResolvedValue({ id: 'site-1' });
+      await expect(
+        service.create('company-a', 'manager-1', {
+          siteId: 'site-1',
+          startsAt: endedShift.startsAt.toISOString(),
+          endsAt: endedShift.endsAt.toISOString(),
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(prisma.shift.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses to modify or delete an ended shift', async () => {
+      prisma.shift.findFirst.mockResolvedValue(endedShift);
+      await expect(service.update('company-a', 'shift-old', { status: 'published' })).rejects.toThrow(ConflictException);
+      await expect(service.remove('company-a', 'shift-old')).rejects.toThrow(ConflictException);
+      expect(prisma.shift.update).not.toHaveBeenCalled();
+      expect(prisma.shift.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses to move a future shift into the past', async () => {
+      prisma.shift.findFirst.mockResolvedValue({
+        ...endedShift,
+        startsAt: new Date('2026-09-01T08:00:00.000Z'),
+        endsAt: new Date('2026-09-01T16:00:00.000Z'),
+      });
+      await expect(
+        service.update('company-a', 'shift-old', {
+          startsAt: endedShift.startsAt.toISOString(),
+          endsAt: endedShift.endsAt.toISOString(),
+        }),
+      ).rejects.toThrow(ConflictException);
     });
   });
 });

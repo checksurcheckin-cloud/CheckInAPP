@@ -21,6 +21,9 @@ type Props = {
   // le marché (décision #33). L'assignation directe se fait par
   // glisser-déposer sur la ligne d'un employé.
   onProposeOnMarket: (shift: Shift) => void;
+  // Magasin consulté hors périmètre du manager (décision #36) : carte
+  // visible mais figée, comme un shift terminé.
+  readOnly?: boolean;
   onEdit: (shift: Shift) => void;
   onPublish: (shiftId: string) => void;
   busy: boolean;
@@ -41,6 +44,7 @@ export function ShiftCard({
   onDelete,
   onDuplicate,
   onProposeOnMarket,
+  readOnly = false,
   onEdit,
   onPublish,
   busy,
@@ -50,12 +54,13 @@ export function ShiftCard({
   // Shift terminé = historique figé (décision #32) : plus déplaçable,
   // assignable, publiable ni supprimable — le backend le refuserait en 409.
   const ended = isEnded(shift.endsAt);
+  const locked = ended || readOnly;
   const [isPressed, setIsPressed] = useState(false);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `shift-${shift.id}`,
     data: { type: 'shift', shiftId: shift.id, startsAt: shift.startsAt, endsAt: shift.endsAt },
-    disabled: ended,
+    disabled: locked,
   });
 
   // Un clic ouvre l'édition, mais seulement s'il n'y a pas eu de glisser
@@ -93,13 +98,19 @@ export function ShiftCard({
         }}
         onPointerUp={() => {
           setIsPressed(false);
-          if (!ended && !draggedRef.current) {
+          if (!locked && !draggedRef.current) {
             onEdit(shift);
           }
         }}
         onPointerCancel={() => setIsPressed(false)}
-        style={{ ...styles.dragHandle, cursor: ended ? 'default' : squeezed ? DRAG_CURSOR_ACTIVE : DRAG_CURSOR }}
-        title={ended ? 'Shift terminé : il ne peut plus être modifié' : 'Cliquer pour modifier, glisser pour déplacer/assigner'}
+        style={{ ...styles.dragHandle, cursor: locked ? 'default' : squeezed ? DRAG_CURSOR_ACTIVE : DRAG_CURSOR }}
+        title={
+          ended
+            ? 'Shift terminé : il ne peut plus être modifié'
+            : readOnly
+              ? "Lecture seule : ce magasin ne fait pas partie des vôtres"
+              : 'Cliquer pour modifier, glisser pour déplacer/assigner'
+        }
       >
         {ended ? (
           <span style={styles.draftTag}>
@@ -118,7 +129,7 @@ export function ShiftCard({
         {shift.roleNeeded ? <span style={{ ...styles.role, color: palette.text }}>{shift.roleNeeded}</span> : null}
       </div>
 
-      {!ended && !hasAssignment ? (
+      {!locked && !hasAssignment ? (
         <button
           type="button"
           className="btn"
@@ -137,7 +148,7 @@ export function ShiftCard({
         </button>
       ) : null}
 
-      {ended ? null : (
+      {locked ? null : (
       <div style={styles.cardActions}>
         {isDraft ? (
           <button

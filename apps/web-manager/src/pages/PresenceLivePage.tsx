@@ -88,7 +88,7 @@ export function PresenceLivePage() {
 
   useEffect(() => {
     // Seulement les magasins gérés (décision #36).
-    loadManagedSites().then(({ sites: list }) => {
+    loadManagedSites().then(({ managedSites: list }) => {
       setSites(list);
       setSelectedSiteId((current) => current ?? list[0]?.id ?? null);
     });

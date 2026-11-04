@@ -18,6 +18,8 @@ type Props = {
   onDeleteShift: (id: string) => void;
   onDuplicateShift: (shift: Shift) => void;
   onProposeOnMarket: (shift: Shift) => void;
+  // Magasin hors périmètre (décision #36) : ni dépose ni action sur les cartes.
+  readOnly?: boolean;
   onEditShift: (shift: Shift) => void;
   onPublishShift: (shiftId: string) => void;
   busyId: string | null;
@@ -50,6 +52,7 @@ export function PlanningGridCell({
   onDeleteShift,
   onDuplicateShift,
   onProposeOnMarket,
+  readOnly = false,
   onEditShift,
   onPublishShift,
   busyId,
@@ -85,7 +88,8 @@ export function PlanningGridCell({
   const isPastDay = isEnded(addDays(new Date(date.getFullYear(), date.getMonth(), date.getDate()), 1));
 
   const disabled = Boolean(
-    (blockedAssigneeId !== null && blockedAssigneeId !== employeeId) ||
+    readOnly ||
+      (blockedAssigneeId !== null && blockedAssigneeId !== employeeId) ||
       draggedOverlapsUnavailability ||
       draggedWouldBeEnded,
   );
@@ -132,6 +136,7 @@ export function PlanningGridCell({
           onDelete={onDeleteShift}
           onDuplicate={onDuplicateShift}
           onProposeOnMarket={onProposeOnMarket}
+          readOnly={readOnly}
           onEdit={onEditShift}
           onPublish={onPublishShift}
           busy={busyId === shift.id}

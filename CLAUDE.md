@@ -915,21 +915,39 @@ Cible : PME de 20-100 employés par site.
       métier, sur l'entité réellement ciblée rechargée et rescopée par
       `companyId` (`ensureShift`, `ensureOffer`, `ensureTimeEntry`,
       `ensureDevice`, `ensureUser`, `ensureSite`) — jamais sur un `siteId`
-      client seul. Hors périmètre = 403. Listes filtrées côté requête :
-      `GET /shifts` (manager, hors `mine=true`) et
-      `GET /shift-offers/pending`.
+      client seul. Hors périmètre = 403. **Seules les modifications sont
+      limitées** : un manager limité consulte librement le planning
+      (`GET /shifts`) et l'équipe des autres magasins (demande explicite).
+      Restent filtrés à ses magasins : `GET /shift-offers/pending` (échanges
+      à valider) et la présence en direct (`GET /sites/:id/presence`).
     - Manager limité : agit seulement sur les employés de ses magasins ou
       pas encore rattachés, jamais sur un autre manager/admin ; n'invite que
       des employés rattachés à un de ses magasins ; ne change aucun rôle (promouvoir
-      quelqu'un manager lui donnerait tous les magasins) ; ne crée
-      pas de site (`ensureAllSites`) mais modifie les siens.
+      quelqu'un manager lui donnerait tous les magasins, `ensureAllSites`).
+      La gestion des sites est de toute façon réservée à l'admin
+      (décision #37).
     - Restent volontairement non filtrés (lecture d'annuaire, aussi utilisés
       par l'app mobile pour afficher des noms) : `GET /sites`, `GET /users`,
       `GET /availabilities`. web-manager filtre ses listes déroulantes via
-      `GET /users/me/scope` (`lib/siteScope.ts` → `loadManagedSites`) :
-      Planning, Présence, Sites (formulaire de création masqué), Équipe
-      (employés hors périmètre masqués, rôle non modifiable).
+      `GET /users/me/scope` (`lib/siteScope.ts` → `loadManagedSites`, qui
+      renvoie tous les sites + ceux gérés) : un manager limité **arrive sur
+      son magasin** (Planning, filtre de l'Équipe) mais peut en choisir un
+      autre, affiché en lecture seule — Planning : bandeau « Lecture seule »,
+      ni modèles ni bouton Publier, cartes figées (`readOnly` sur
+      `PlanningGridCell`/`ShiftCard`) ; Équipe : contrôles désactivés sur les
+      lignes hors périmètre (`canManage`, même règle que `ensureUser`), rôles
+      jamais modifiables. Présence : seulement ses magasins dans la liste.
     - checkin-mobile n'est pas concerné (décision #31).
+
+37. **Sites et Réglages = admin uniquement.** Un manager (limité ou non) ne
+    crée, ne modifie ni ne supprime de site, et ne touche pas aux réglages
+    de l'entreprise : `POST`/`PATCH`/`DELETE /sites` et
+    `PATCH /companies/me(/settings)` sont `@Roles('admin')`. web-manager
+    masque les onglets Sites et Réglages pour un manager (`AppShell`,
+    `adminOnly`) et ne déclare même pas ces routes (`App.tsx`) : l'URL tapée
+    à la main retombe sur le planning. Restent ouverts aux managers :
+    `GET /sites` (annuaire), la présence de leurs magasins et l'appairage
+    des tablettes (`/site-devices`, dans leur périmètre, décision #36).
 
 ## Stack
 

@@ -25,17 +25,15 @@ export class ShiftsController {
   ) {}
 
   @Get('shifts')
-  async findAll(@CurrentUser() user: AuthenticatedUser, @Query() query: FindShiftsQueryDto) {
-    if (user.role === 'employee' || query.mine === 'true') {
-      return this.shiftsService.findAll(user, query);
-    }
-    if (query.siteId) await this.siteScope.ensureSite(user, query.siteId);
-    return this.shiftsService.findAll(user, query, await this.siteScope.managedSiteIds(user));
+  // Lecture du planning : un manager limité peut consulter les horaires des
+  // autres magasins (décision #36) — seules les modifications sont
+  // restreintes à ses magasins.
+  findAll(@CurrentUser() user: AuthenticatedUser, @Query() query: FindShiftsQueryDto) {
+    return this.shiftsService.findAll(user, query);
   }
 
   @Get('shifts/:id')
-  async findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
-    if (user.role !== 'employee') await this.siteScope.ensureShift(user, id);
+  findOne(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.shiftsService.findOne(user.companyId, id);
   }
 

@@ -63,20 +63,13 @@ export class ShiftsService {
   //
   // `mine=true` applique ce même filtre "employé" à n'importe quel rôle : sur
   // checkin-mobile, un manager a exactement l'app d'un employé (décision #31).
-  // `scopeSiteIds` : magasins gérés par un manager limité (décision #36),
-  // null = tous. Le contrôleur a déjà vérifié qu'un `query.siteId` explicite
-  // en fait partie.
-  findAll(user: AuthenticatedUser, query: FindShiftsQueryDto, scopeSiteIds: string[] | null = null) {
+  findAll(user: AuthenticatedUser, query: FindShiftsQueryDto) {
     const isEmployee = user.role === 'employee' || query.mine === 'true';
 
     return this.prisma.shift.findMany({
       where: {
         site: { companyId: user.companyId },
-        ...(query.siteId
-          ? { siteId: query.siteId }
-          : scopeSiteIds && !isEmployee
-            ? { siteId: { in: scopeSiteIds } }
-            : {}),
+        ...(query.siteId ? { siteId: query.siteId } : {}),
         ...(query.from || query.to
           ? {
               startsAt: {

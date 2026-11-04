@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { UserPlus, RefreshCw, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { Site, SiteScope, User, UserRole, UserStatus } from '@horaires/shared-types';
@@ -50,6 +50,10 @@ export function TeamPage() {
   const [scope, setScope] = useState<SiteScope | null>(null);
   const scoped = scope !== null && !scope.allSites;
   const [managedTarget, setManagedTarget] = useState<User | null>(null);
+  const [managedSiteIds, setManagedSiteIds] = useState<string[]>([]);
+  // Le filtre n'est posé sur le magasin du manager qu'au premier chargement,
+  // pas à chaque rechargement après une action.
+  const filterInitialized = useRef(false);
 
   const load = async () => {
     setIsLoading(true);
@@ -57,12 +61,17 @@ export function TeamPage() {
       const [list, managed] = await Promise.all([apiClient.getUsers(), loadManagedSites()]);
       setUsers(list);
       setSites(managed.sites);
+      setManagedSiteIds(managed.managedSites.map((m) => m.id));
       setScope(managed.scope);
-      // Manager limité : un employé invité doit être rattaché à un de ses
-      // magasins (le backend le refuse sinon).
+      // Manager limité : on arrive sur la liste de son magasin, et un employé
+      // invité doit être rattaché à un de ses magasins (le backend le refuse
+      // sinon).
       if (!managed.scope.allSites) {
-        setInviteSiteId((current) => current || managed.sites[0]?.id || '');
+        const home = managed.managedSites[0]?.id ?? '';
+        setInviteSiteId((current) => current || home);
+        if (!filterInitialized.current) setSiteFilter(home);
       }
+      filterInitialized.current = true;
     } finally {
       setIsLoading(false);
     }
@@ -202,15 +211,17 @@ export function TeamPage() {
     return !(u.status === 'active' && activeAdminCount <= 1);
   };
 
-  const scopedUsers = scoped
-    ? users.filter((u) => u.role === 'employee' && (!u.siteId || scope!.siteIds.includes(u.siteId)))
-    : users;
+  // Un manager limité voit toute l'équipe mais ne modifie que les employés
+  // de ses magasins, ou pas encore rattachés (même règle que le backend,
+  // SiteScopeService.ensureUser) — les autres lignes sont en lecture seule.
+  const canManage = (u: User) =>
+    !scoped || (u.role === 'employee' && (!u.siteId || managedSiteIds.includes(u.siteId)));
   const visibleUsers =
     siteFilter === ''
-      ? scopedUsers
+      ? users
       : siteFilter === 'none'
-        ? scopedUsers.filter((u) => u.role === 'employee' && !u.siteId)
-        : scopedUsers.filter((u) => u.siteId === siteFilter);
+        ? users.filter((u) => u.role === 'employee' && !u.siteId)
+        : users.filter((u) => u.siteId === siteFilter);
 
   return (
     <div>
@@ -255,7 +266,7 @@ export function TeamPage() {
           )}
           <select style={styles.input} value={inviteSiteId} onChange={(e) => setInviteSiteId(e.target.value)}>
             {scoped ? null : <option value="">Aucun site</option>}
-            {sites.map((s) => (
+            {sites.filter((s) => !scoped || managedSiteIds.includes(s.id)).map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
@@ -311,7 +322,7 @@ export function TeamPage() {
                     <select
                       style={styles.inlineSelect}
                       value={u.role}
-                      disabled={busyUserId === u.id}
+                      disabled={busyUserId === u.id || !canManage(u)}
                       onChange={(e) => changeRole(u.id, e.target.value as UserRole)}
                     >
                       <option value="employee">{ROLE_LABELS.employee}</option>
@@ -329,12 +340,12 @@ export function TeamPage() {
                     <select
                       style={styles.inlineSelect}
                       value={u.siteId ?? ''}
-                      disabled={busyUserId === u.id}
+                      disabled={busyUserId === u.id || !canManage(u)}
                       onChange={(e) => changeSite(u.id, e.target.value)}
                     >
                       <option value="">Aucun (tous les sites)</option>
                       {sites.map((s) => (
-                        <option key={s.id} value={s.id}>
+                        <option key={s.id} value={s.id} disabled={scoped && !managedSiteIds.includes(s.id)}>
                           {s.name}
                         </option>
                       ))}
@@ -345,7 +356,7 @@ export function TeamPage() {
                       type="button"
                       className="btn"
                       style={styles.inlineSelect}
-                      disabled={busyUserId === u.id}
+                      disabled={busyUserId === u.id || !canManage(u)}
                       onClick={() => setManagedTarget(u)}
                     >
                       {managedSitesLabel(u, sites)} ▾
@@ -357,11 +368,11 @@ export function TeamPage() {
                   )}
                 </td>
                 <td style={styles.td}>
-                  {canEditAccess(u) ? (
+                  {canEditAccess(u) && canManage(u) ? (
                     <select
                       style={styles.inlineSelect}
                       value={u.status}
-                      disabled={busyUserId === u.id}
+                      disabled={busyUserId === u.id || !canManage(u)}
                       onChange={(e) => changeStatus(u.id, e.target.value as UserStatus)}
                     >
                       <option value="invited">{STATUS_LABELS.invited}</option>
@@ -376,7 +387,7 @@ export function TeamPage() {
                   <button
                     className="btn"
                     style={styles.smallButton}
-                    disabled={busyUserId === u.id}
+                    disabled={busyUserId === u.id || !canManage(u)}
                     onClick={() => regenerateBadge(u.id)}
                   >
                     <RefreshCw size={12} strokeWidth={2.25} />
@@ -391,7 +402,7 @@ export function TeamPage() {
                     <button
                       className="btn"
                       style={styles.iconButton}
-                      disabled={busyUserId === u.id}
+                      disabled={busyUserId === u.id || !canManage(u)}
                       onClick={() => togglePin(u.id)}
                       aria-label={u.id in revealedPins ? 'Masquer le PIN' : 'Afficher le PIN'}
                       title={u.id in revealedPins ? 'Masquer le PIN' : 'Afficher le PIN'}
@@ -401,7 +412,7 @@ export function TeamPage() {
                     <button
                       className="btn"
                       style={styles.smallButton}
-                      disabled={busyUserId === u.id}
+                      disabled={busyUserId === u.id || !canManage(u)}
                       onClick={() => setPinToRegenerate(u)}
                     >
                       <KeyRound size={12} strokeWidth={2.25} />
@@ -414,7 +425,7 @@ export function TeamPage() {
                     <select
                       style={styles.inlineSelect}
                       value={u[key] === true ? 'on' : u[key] === false ? 'off' : 'inherit'}
-                      disabled={busyUserId === u.id}
+                      disabled={busyUserId === u.id || !canManage(u)}
                       onChange={(e) => changeClockInSetting(u.id, key, e.target.value as 'inherit' | 'on' | 'off')}
                     >
                       <option value="inherit">Suit le réglage entreprise</option>

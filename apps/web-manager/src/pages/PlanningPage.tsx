@@ -10,10 +10,10 @@ import {
 } from '@dnd-kit/core';
 import { ChevronLeft, ChevronRight, Plus, Send } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows, shiftPalette } from '@horaires/ui-tokens';
-import type { Availability, ProposeShiftOnMarketPayload, Shift, Site, User } from '@horaires/shared-types';
+import type { Availability, ProposeShiftOnMarketPayload, Shift, Site, SiteScope, User } from '@horaires/shared-types';
 import { ApiError } from '@horaires/api-client';
 import { apiClient, useAuth } from '../services/AuthService';
-import { loadManagedSites } from '../lib/siteScope';
+import { canManageSite, loadManagedSites } from '../lib/siteScope';
 import { SiteSelect } from '../components/SiteSelect';
 import { PlanningGridCell } from '../components/PlanningGridCell';
 import { EmployeeRowHeader } from '../components/EmployeeRowHeader';
@@ -58,6 +58,9 @@ export function PlanningPage() {
   const { socket } = useAuth();
   const [sites, setSites] = useState<Site[]>([]);
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
+  // Manager limité (décision #36) : il consulte tous les magasins mais ne
+  // modifie que les siens — un autre magasin s'affiche en lecture seule.
+  const [scope, setScope] = useState<SiteScope | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [availabilities, setAvailabilities] = useState<Availability[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('week');
@@ -114,10 +117,12 @@ export function PlanningPage() {
   }, [hasTemplates]);
 
   useEffect(() => {
-    // Seulement les magasins gérés (décision #36).
-    loadManagedSites().then(({ sites: list }) => {
+    // Tous les magasins dans la liste, mais on arrive sur le sien
+    // (décision #36).
+    loadManagedSites().then(({ sites: list, managedSites, scope: myScope }) => {
       setSites(list);
-      setSelectedSiteId((current) => current ?? list[0]?.id ?? null);
+      setScope(myScope);
+      setSelectedSiteId((current) => current ?? managedSites[0]?.id ?? list[0]?.id ?? null);
     });
     apiClient.getUsers().then(setUsers);
     loadAvailabilities();
@@ -374,6 +379,7 @@ export function PlanningPage() {
 
   const handleDragEnd = (event: DragEndEvent) => {
     setActiveDrag(null);
+    if (readOnly) return;
     const { active, over } = event;
     if (!over) return;
 
@@ -452,6 +458,7 @@ export function PlanningPage() {
       return total + dayTotal;
     }, 0);
 
+  const readOnly = !canManageSite(scope, selectedSiteId);
   const draftCount = shifts.filter((s) => s.status === 'draft' && !isEnded(s.endsAt)).length;
 
   return (
@@ -491,6 +498,7 @@ export function PlanningPage() {
           <button className="btn btn-icon" style={styles.navButton} onClick={() => setWeekStart(addDays(weekStart, 7))}>
             <ChevronRight size={16} strokeWidth={2.5} />
           </button>
+          {readOnly ? null : (
           <button
             className="btn btn-gradient"
             style={styles.publishButton}
@@ -501,6 +509,7 @@ export function PlanningPage() {
             <Send size={14} strokeWidth={2.5} />
             {isPublishing ? 'Publication…' : draftCount > 0 ? `Publier ${draftCount} brouillon${draftCount > 1 ? 's' : ''}` : 'Publier'}
           </button>
+          )}
         </div>
       ) : (
         <div style={styles.weekNav}>
@@ -516,6 +525,12 @@ export function PlanningPage() {
         </div>
       )}
 
+      {readOnly ? (
+        <div style={styles.readOnlyNotice}>
+          Lecture seule : ce magasin ne fait pas partie des vôtres. Vous pouvez consulter son planning, mais pas le
+          modifier.
+        </div>
+      ) : (
       <div style={styles.createForm}>
         <h2 style={styles.sectionTitle}>Nouveau shift</h2>
         <p style={styles.hint}>
@@ -564,12 +579,13 @@ export function PlanningPage() {
           <p style={styles.emptyTemplates}>Aucun modèle pour l'instant — créez-en un ci-dessus.</p>
         ) : null}
       </div>
+      )}
 
       {/* Bibliothèque de modèles collée en haut de `main` pendant le défilement,
           pour pouvoir glisser une carte sur n'importe quelle ligne de la grille
           sans remonter. La sentinelle (hauteur 0) sort de l'écran au moment
           où la barre se colle, ce qui active l'ombre. */}
-      {templates.length > 0 ? (
+      {templates.length > 0 && !readOnly ? (
         <>
           <div ref={templateSentinelRef} aria-hidden style={styles.templateSentinel} />
           <div style={{ ...styles.templateTray, ...(isTemplateTrayStuck ? styles.templateTrayStuck : {}) }}>
@@ -644,6 +660,7 @@ export function PlanningPage() {
                   onEditShift={setEditingShift}
                   onPublishShift={publishShift}
                   busyId={busyId}
+                  readOnly={readOnly}
                   blockedAssigneeId={blockedAssigneeId}
                   draggedTimeRange={draggedTimeRange}
                 />
@@ -667,6 +684,7 @@ export function PlanningPage() {
                       onEditShift={setEditingShift}
                       onPublishShift={publishShift}
                       busyId={busyId}
+                      readOnly={readOnly}
                       blockedAssigneeId={blockedAssigneeId}
                       draggedTimeRange={draggedTimeRange}
                       unavailabilityInfo={getUnavailabilityInfo(availabilities, user.id, date)}
@@ -855,6 +873,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   templateSentinel: { height: 0 },
   // zIndex au-dessus des cellules sticky de la grille (zIndex 2).
+  readOnlyNotice: {
+    padding: `${spacing.sm}px ${spacing.md}px`,
+    marginBottom: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.warningTint,
+    color: colors.textPrimary,
+    fontSize: typography.sizes.sm,
+  },
   templateTray: {
     position: 'sticky',
     top: 0,

@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { PresenceStatus, PresentEmployee, Site, TimeEntrySource } from '@horaires/shared-types';
-import { apiClient, useAuth } from '../services/AuthService';
-import { loadManagedSites } from '../lib/siteScope';
+import { apiClient } from '../services/AuthService';
+import { usePresence, useSiteScope } from '../lib/queries';
 import { SiteSelect } from '../components/SiteSelect';
 import { PresenceDetailDialog } from '../components/PresenceDetailDialog';
 import { computeDayTotals, formatClockTime, formatDuration, formatElapsed, lastDeparture } from '../lib/presence';
@@ -55,12 +55,18 @@ function sourceBadge(employee: PresentEmployee, resolvedAddress?: string): { tex
   return { text: label, color: colors.textSecondary };
 }
 
+const NO_SITES: Site[] = [];
+const NO_EMPLOYEES: PresentEmployee[] = [];
+
 export function PresenceLivePage() {
-  const { socket } = useAuth();
-  const [sites, setSites] = useState<Site[]>([]);
+  // Seulement les magasins gérés (décision #36).
+  const sites = useSiteScope().data?.managedSites ?? NO_SITES;
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
-  const [present, setPresent] = useState<PresentEmployee[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // Rechargée toutes les 30s et à chaque pointage (signal temps réel), sans
+  // repasser par « Chargement… » : les cartes et la modale restent affichées.
+  const presenceQuery = usePresence(selectedSiteId);
+  const present = presenceQuery.data ?? NO_EMPLOYEES;
+  const isLoading = presenceQuery.isPending;
   // Adresses résolues par géocodage inverse, indexées par "lat,lng" arrondi —
   // évite de re-résoudre la même position à chaque rafraîchissement (30s).
   const [addressLabels, setAddressLabels] = useState<Record<string, string>>({});
@@ -87,56 +93,12 @@ export function PresenceLivePage() {
   const onSiteDuty = present.filter((e) => e.status !== 'left').length;
 
   useEffect(() => {
-    // Seulement les magasins gérés (décision #36).
-    loadManagedSites().then(({ managedSites: list }) => {
-      setSites(list);
-      setSelectedSiteId((current) => current ?? list[0]?.id ?? null);
-    });
-  }, []);
-
-  // `silent` : rafraîchissements automatiques (polling, websocket) — on garde
-  // les cartes et la modale affichées au lieu de repasser par « Chargement… ».
-  const loadPresence = useCallback(async (siteId: string, { silent = false }: { silent?: boolean } = {}) => {
-    if (!silent) setIsLoading(true);
-    try {
-      const list = await apiClient.getPresence(siteId);
-      // Un backend pas encore redéployé renvoie l'ancien format (présents
-      // seulement, sans status/entries) — on complète plutôt que de planter.
-      setPresent(
-        list.map((e) => ({
-          ...e,
-          status: e.status ?? 'present',
-          breakSince: e.breakSince ?? null,
-          entries: e.entries ?? [{ type: 'clock_in', timestamp: e.since, source: e.source }],
-        })),
-      );
-    } finally {
-      if (!silent) setIsLoading(false);
-    }
-  }, []);
+    if (!selectedSiteId && sites.length > 0) setSelectedSiteId(sites[0].id);
+  }, [sites, selectedSiteId]);
 
   useEffect(() => {
     setSelectedEmployeeId(null);
-    if (selectedSiteId) void loadPresence(selectedSiteId);
-  }, [selectedSiteId, loadPresence]);
-
-  // Rafraîchit automatiquement — vue "en direct" pensée pour rester ouverte.
-  // Le polling 30s reste en filet de sécurité (socket déconnecté, backend
-  // sans websocket) ; le websocket sert juste à rafraîchir plus vite.
-  useEffect(() => {
-    if (!selectedSiteId) return;
-    const interval = setInterval(() => loadPresence(selectedSiteId, { silent: true }), 30_000);
-    return () => clearInterval(interval);
-  }, [selectedSiteId, loadPresence]);
-
-  useEffect(() => {
-    if (!socket || !selectedSiteId) return;
-    const onTimeEntriesChanged = () => void loadPresence(selectedSiteId, { silent: true });
-    socket.on('time-entries:changed', onTimeEntriesChanged);
-    return () => {
-      socket.off('time-entries:changed', onTimeEntriesChanged);
-    };
-  }, [socket, selectedSiteId, loadPresence]);
+  }, [selectedSiteId]);
 
   // Résout en adresse lisible les pointages GPS pour lesquels aucune distance
   // n'a pu être calculée (site sans coordonnées) — échec silencieux : en cas

@@ -1,7 +1,10 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { colors } from '@horaires/ui-tokens';
 import { AuthProvider, useAuth } from './services/AuthService';
+import { queryClient } from './lib/queryClient';
+import { useRealtimeInvalidation } from './lib/queries';
 import { AppShell } from './components/AppShell';
 import { LoginPage } from './pages/LoginPage';
 import { PlanningPage } from './pages/PlanningPage'; // SEUL endroit avec création d'horaires
@@ -22,16 +25,22 @@ import { SitesPage } from './pages/SitesPage'; // gestion des lieux de travail (
  */
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <RootRoutes />
-      </BrowserRouter>
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <BrowserRouter>
+          <RootRoutes />
+        </BrowserRouter>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 }
 
 function RootRoutes() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, socket } = useAuth();
+  // Un seul abonnement aux signaux temps réel pour toute l'app : chaque page
+  // lit le cache, qui se recharge tout seul quand le backend signale un
+  // changement.
+  useRealtimeInvalidation(socket);
 
   if (isLoading) {
     return (

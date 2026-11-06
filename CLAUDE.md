@@ -1034,6 +1034,20 @@ reste "à faire".
   check) est celle saisie dans l'interface Railway ; `railway.json` a été
   supprimé du repo pour ne pas laisser croire qu'elle est versionnée. `prisma` est une dépendance de production du backend
   pour que la CLI soit présente à l'exécution.
+- **Cache côté client dans web-manager (TanStack Query)** : toutes les
+  lectures passent par les hooks de `apps/web-manager/src/lib/queries.ts`
+  (`useShifts`, `useUsers`, `useSiteScope`, `usePresence`…), jamais par un
+  `useEffect` + `apiClient` dans une page. Données fraîches 30s, affichées
+  depuis le cache au-delà et rechargées en arrière-plan. Après une action, une
+  page invalide la clé concernée (`queryClient.invalidateQueries`) au lieu de
+  recharger à la main. Les signaux temps réel sont branchés une seule fois
+  (`useRealtimeInvalidation`, table `INVALIDATIONS`) : toute nouvelle donnée
+  affichée doit y avoir son signal, et le backend doit émettre ce signal à
+  chaque écriture (`sites:changed`, `users:changed` ajoutés pour ça). Le cache
+  est vidé à la connexion et à la déconnexion (jamais de données d'un compte
+  précédent). Pas de cache serveur (Redis) : inutile à cette échelle, risque
+  de données périmées sur le pointage ; à reconsidérer avec plusieurs
+  instances du backend.
 
 **Connu manquant / dette identifiée** :
 1. Pas de révocation de session côté backend (voir logout ci-dessus) — à

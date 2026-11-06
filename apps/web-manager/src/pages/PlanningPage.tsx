@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   DndContext,
   DragOverlay,
@@ -10,10 +11,11 @@ import {
 } from '@dnd-kit/core';
 import { ChevronLeft, ChevronRight, Plus, Send } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows, shiftPalette } from '@horaires/ui-tokens';
-import type { Availability, ProposeShiftOnMarketPayload, Shift, Site, SiteScope, User } from '@horaires/shared-types';
+import type { Availability, ProposeShiftOnMarketPayload, Shift, Site, User } from '@horaires/shared-types';
 import { ApiError } from '@horaires/api-client';
-import { apiClient, useAuth } from '../services/AuthService';
-import { canManageSite, loadManagedSites } from '../lib/siteScope';
+import { apiClient } from '../services/AuthService';
+import { canManageSite } from '../lib/siteScope';
+import { queryKeys, useAvailabilities, useShifts, useSiteScope, useUsers } from '../lib/queries';
 import { SiteSelect } from '../components/SiteSelect';
 import { PlanningGridCell } from '../components/PlanningGridCell';
 import { EmployeeRowHeader } from '../components/EmployeeRowHeader';
@@ -52,24 +54,28 @@ type DragPayload =
   | { type: 'template'; templateId: string; startTime: string; endTime: string; roleNeeded?: string };
 type DropPayload = { type: 'cell'; date: string; employeeId: string | null };
 
+const NO_SITES: Site[] = [];
+const NO_USERS: User[] = [];
+const NO_AVAILABILITIES: Availability[] = [];
+const NO_SHIFTS: Shift[] = [];
+
 // SEUL endroit de tout le produit où on peut créer/éditer des horaires
 // (voir CLAUDE.md — choix produit, pas une restriction API).
 export function PlanningPage() {
-  const { socket } = useAuth();
-  const [sites, setSites] = useState<Site[]>([]);
+  const queryClient = useQueryClient();
+  const scopeQuery = useSiteScope();
+  const sites = scopeQuery.data?.sites ?? NO_SITES;
   const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
   // Manager limité (décision #36) : il consulte tous les magasins mais ne
   // modifie que les siens — un autre magasin s'affiche en lecture seule.
-  const [scope, setScope] = useState<SiteScope | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
-  const [availabilities, setAvailabilities] = useState<Availability[]>([]);
+  const scope = scopeQuery.data?.scope ?? null;
+  const users = useUsers().data ?? NO_USERS;
+  const availabilities = useAvailabilities().data ?? NO_AVAILABILITIES;
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [weekScope, setWeekScope] = useState<WeekScope>('week');
   const [selectedDay, setSelectedDay] = useState(() => new Date());
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()));
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
 
   // Modèles de shift réutilisables ("16h-20h") — pas de date, voir
   // lib/shiftTemplates. Persistés en local, indépendamment du site affiché.
@@ -89,13 +95,6 @@ export function PlanningPage() {
   const [isPublishing, setIsPublishing] = useState(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-
-  const loadAvailabilities = useCallback(() => {
-    // Pas de userId : vue manager, toute l'entreprise (voir
-    // AvailabilitiesService.findAll) — nécessaire pour marquer les jours
-    // indisponibles de n'importe quel employé dans la grille.
-    apiClient.getAvailabilities().then(setAvailabilities);
-  }, []);
 
   const templateSentinelRef = useRef<HTMLDivElement>(null);
   const [isTemplateTrayStuck, setIsTemplateTrayStuck] = useState(false);
@@ -119,59 +118,35 @@ export function PlanningPage() {
   useEffect(() => {
     // Tous les magasins dans la liste, mais on arrive sur le sien
     // (décision #36).
-    loadManagedSites().then(({ sites: list, managedSites, scope: myScope }) => {
-      setSites(list);
-      setScope(myScope);
-      setSelectedSiteId((current) => current ?? managedSites[0]?.id ?? list[0]?.id ?? null);
-    });
-    apiClient.getUsers().then(setUsers);
-    loadAvailabilities();
-  }, [loadAvailabilities]);
+    const data = scopeQuery.data;
+    if (selectedSiteId || !data) return;
+    setSelectedSiteId(data.managedSites[0]?.id ?? data.sites[0]?.id ?? null);
+  }, [scopeQuery.data, selectedSiteId]);
 
-  // `silent` : refetch après une action sur la grille (dépose, édition,
-  // publication) ou un événement temps réel — on garde la grille affichée
-  // au lieu de la remplacer par « Chargement… », ce qui la démontait et
-  // faisait perdre la position de défilement. Le chargement visible est
-  // réservé au premier affichage et aux changements de site/semaine/mois.
-  const load = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
-    if (!selectedSiteId) return;
-    if (!silent) setIsLoading(true);
-    try {
-      // On charge toute la semaine même en scope "Jour" (juste un filtrage
-      // d'affichage) — pas de refetch au moment de basculer le sélecteur.
-      // La grille mois couvre les 6 semaines visibles, padding inclus.
-      const rangeStart = viewMode === 'week' ? weekStart : startOfWeek(monthAnchor);
-      const rangeEnd = viewMode === 'week' ? addDays(weekStart, 7) : addDays(rangeStart, 42);
-      const list = await apiClient.getShifts({
-        siteId: selectedSiteId,
-        from: rangeStart.toISOString(),
-        to: rangeEnd.toISOString(),
-      });
-      setShifts(list);
-    } finally {
-      if (!silent) setIsLoading(false);
-    }
-  }, [selectedSiteId, weekStart, viewMode, monthAnchor]);
+  // On charge toute la semaine même en scope "Jour" (juste un filtrage
+  // d'affichage) — pas de refetch au moment de basculer le sélecteur. La
+  // grille mois couvre les 6 semaines visibles, padding inclus.
+  const { rangeFrom, rangeTo } = useMemo(() => {
+    const rangeStart = viewMode === 'week' ? weekStart : startOfWeek(monthAnchor);
+    const rangeEnd = viewMode === 'week' ? addDays(weekStart, 7) : addDays(rangeStart, 42);
+    return { rangeFrom: rangeStart.toISOString(), rangeTo: rangeEnd.toISOString() };
+  }, [viewMode, weekStart, monthAnchor]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // Une semaine déjà vue s'affiche tout de suite depuis le cache. Les
+  // rechargements (après une action, ou quand un autre manager / un employé
+  // modifie un shift : signal `shifts:changed`) se font en arrière-plan, sans
+  // « Chargement… » qui démonterait la grille et ferait perdre le défilement.
+  const shiftsQuery = useShifts(selectedSiteId, rangeFrom, rangeTo);
+  const shifts = shiftsQuery.data ?? NO_SHIFTS;
+  const isLoading = shiftsQuery.isPending;
 
-  // Un autre manager (ou l'employé lui-même côté mobile) peut créer, publier
-  // ou modifier un shift pendant que cette page est ouverte — on recharge via
-  // les mêmes load() que le reste de la page plutôt que de fusionner un
-  // payload partiel (voir realtime.gateway.ts côté backend).
-  useEffect(() => {
-    if (!socket) return;
-    const onShiftsChanged = () => void load({ silent: true });
-    const onAvailabilitiesChanged = () => loadAvailabilities();
-    socket.on('shifts:changed', onShiftsChanged);
-    socket.on('availabilities:changed', onAvailabilitiesChanged);
-    return () => {
-      socket.off('shifts:changed', onShiftsChanged);
-      socket.off('availabilities:changed', onAvailabilitiesChanged);
-    };
-  }, [socket, load, loadAvailabilities]);
+  // Après une action sur la grille : recharge les shifts (toutes les
+  // périodes en cache) et les échanges, qui en dépendent.
+  const refreshShifts = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.shifts }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.pendingOffers }),
+    ]);
 
   const createTemplate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -213,7 +188,7 @@ export function PlanningPage() {
     setBusyId(shiftId);
     try {
       await apiClient.deleteShift(shiftId);
-      await load({ silent: true });
+      await refreshShifts();
     } finally {
       setBusyId(null);
     }
@@ -232,7 +207,7 @@ export function PlanningPage() {
         roleNeeded: shift.roleNeeded,
         status: shift.status,
       });
-      await load({ silent: true });
+      await refreshShifts();
     } finally {
       setBusyId(null);
     }
@@ -243,14 +218,14 @@ export function PlanningPage() {
     payload: { siteId: string; startsAt: string; endsAt: string; roleNeeded?: string; status: Shift['status'] },
   ) => {
     await apiClient.updateShift(shiftId, payload);
-    await load({ silent: true });
+    await refreshShifts();
   };
 
   // Public d'un créneau libre sur le marché (décision #33) — l'erreur
   // éventuelle s'affiche dans le dialog, qui reste ouvert.
   const proposeOnMarket = async (shiftId: string, payload: ProposeShiftOnMarketPayload) => {
     await apiClient.proposeShiftOnMarket(shiftId, payload);
-    await load({ silent: true });
+    await refreshShifts();
   };
 
   // Dépose d'un shift existant sur une cellule (employé x jour) : déplace le
@@ -287,7 +262,7 @@ export function PlanningPage() {
       if (targetEmployeeId && targetEmployeeId !== currentAssigneeId) {
         await apiClient.assignShift(shiftId, targetEmployeeId);
       }
-      await load({ silent: true });
+      await refreshShifts();
     } catch (err) {
       setConflictMessage(err instanceof ApiError ? err.message : 'Impossible de déplacer ce shift');
     } finally {
@@ -329,7 +304,12 @@ export function PlanningPage() {
       // Déposé sur « Shifts disponibles » : affiché tout de suite, sans
       // attendre le refetch silencieux. Pas pour une ligne employé — il
       // apparaîtrait un instant dans la ligne libre avant l'assignation.
-      if (!targetEmployeeId) setShifts((current) => [...current, created]);
+      if (!targetEmployeeId) {
+        queryClient.setQueryData<Shift[]>(
+          queryKeys.shiftsRange(selectedSiteId, rangeFrom, rangeTo),
+          (current) => [...(current ?? []), created],
+        );
+      }
       if (targetEmployeeId) {
         try {
           await apiClient.assignShift(created.id, targetEmployeeId);
@@ -339,7 +319,7 @@ export function PlanningPage() {
           );
         }
       }
-      await load({ silent: true });
+      await refreshShifts();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Échec de la création du shift');
     }
@@ -349,7 +329,7 @@ export function PlanningPage() {
     setBusyId(shiftId);
     try {
       await apiClient.updateShift(shiftId, { status: 'published' });
-      await load({ silent: true });
+      await refreshShifts();
     } finally {
       setBusyId(null);
     }
@@ -367,7 +347,7 @@ export function PlanningPage() {
     setIsPublishing(true);
     try {
       await Promise.all(draftIds.map((id) => apiClient.updateShift(id, { status: 'published' })));
-      await load({ silent: true });
+      await refreshShifts();
     } finally {
       setIsPublishing(false);
     }

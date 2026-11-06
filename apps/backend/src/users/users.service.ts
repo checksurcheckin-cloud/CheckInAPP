@@ -94,7 +94,7 @@ export class UsersService implements OnApplicationBootstrap {
     // le manager le lui communique depuis la page Équipe.
     const pin = await this.generateUniquePin(companyId);
 
-    return this.prisma.user.create({
+    const created = await this.prisma.user.create({
       data: {
         companyId,
         email: dto.email,
@@ -109,6 +109,14 @@ export class UsersService implements OnApplicationBootstrap {
       },
       select: SAFE_USER_SELECT,
     });
+    this.notifyUsersChanged(companyId);
+    return created;
+  }
+
+  // Les listes d'équipe sont en cache côté web-manager : ce signal dit aux
+  // autres managers connectés de les recharger.
+  private notifyUsersChanged(companyId: string) {
+    this.realtime.emitToCompany(companyId, 'users:changed');
   }
 
   // Une entreprise doit toujours garder au moins un admin actif — sinon plus
@@ -148,11 +156,13 @@ export class UsersService implements OnApplicationBootstrap {
     if (dto.role !== 'manager') {
       await this.prisma.managedSite.deleteMany({ where: { userId: id } });
     }
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: { role: dto.role },
       select: SAFE_USER_SELECT,
     });
+    this.notifyUsersChanged(companyId);
+    return updated;
   }
 
   // Pas encore de flow "accepter l'invitation" (voir CLAUDE.md, "Connu
@@ -166,21 +176,25 @@ export class UsersService implements OnApplicationBootstrap {
     if (target.role === 'admin' && dto.status !== 'active') {
       await this.ensureNotLastActiveAdmin(companyId, target);
     }
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: { status: dto.status },
       select: SAFE_USER_SELECT,
     });
+    this.notifyUsersChanged(companyId);
+    return updated;
   }
 
   async regenerateBadge(companyId: string, id: string) {
     await this.findOne(companyId, id);
     const badgeCode = randomBytes(8).toString('hex');
-    return this.prisma.user.update({
+    const updated = await this.prisma.user.update({
       where: { id },
       data: { badgeCode },
       select: SAFE_USER_SELECT,
     });
+    this.notifyUsersChanged(companyId);
+    return updated;
   }
 
   // Surcharge individuelle du réglage GPS de l'entreprise, et/ou site de
@@ -206,6 +220,7 @@ export class UsersService implements OnApplicationBootstrap {
         ? [this.prisma.managedSite.createMany({ data: unique.map((siteId) => ({ userId: id, siteId })) })]
         : []),
     ]);
+    this.notifyUsersChanged(companyId);
     return this.findOne(companyId, id);
   }
 
@@ -272,6 +287,7 @@ export class UsersService implements OnApplicationBootstrap {
       // checkin-mobile de cet employé affiche/masque Pointage en direct.
       this.realtime.emitToCompany(companyId, 'settings:changed');
     }
+    this.notifyUsersChanged(companyId);
     return updated;
   }
 

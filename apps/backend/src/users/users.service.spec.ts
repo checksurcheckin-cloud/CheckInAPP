@@ -227,7 +227,9 @@ describe('UsersService', () => {
     await service.updateSettings('company-a', 'user-1', { siteId: 'site-1' });
 
     expect(prisma.shiftAssignment.updateMany).not.toHaveBeenCalled();
-    expect(realtime.emitToCompany).not.toHaveBeenCalled();
+    // Seul l'annuaire est signalé (cache d'équipe du web-manager), pas le planning.
+    expect(realtime.emitToCompany).toHaveBeenCalledTimes(1);
+    expect(realtime.emitToCompany).toHaveBeenCalledWith('company-a', 'users:changed');
   });
 
   it('does not touch shift assignments when updateSettings() only changes an unrelated field', async () => {
@@ -237,9 +239,10 @@ describe('UsersService', () => {
     await service.updateSettings('company-a', 'user-1', { gpsClockInEnabled: true });
 
     expect(prisma.shiftAssignment.updateMany).not.toHaveBeenCalled();
-    // Seul l'événement de réglages part (l'app mobile ré-affiche Pointage/GPS).
-    expect(realtime.emitToCompany).toHaveBeenCalledTimes(1);
+    // Réglages (l'app mobile ré-affiche Pointage/GPS) et annuaire — pas le planning.
+    expect(realtime.emitToCompany).toHaveBeenCalledTimes(2);
     expect(realtime.emitToCompany).toHaveBeenCalledWith('company-a', 'settings:changed');
+    expect(realtime.emitToCompany).toHaveBeenCalledWith('company-a', 'users:changed');
   });
 
   it('resolves clock-in settings scoped to the company, user override first, each setting independent', async () => {

@@ -1,10 +1,12 @@
 import { Test } from '@nestjs/testing';
 import { NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { SitesService } from './sites.service';
 
 describe('SitesService', () => {
   let service: SitesService;
+  let realtime: { emitToCompany: jest.Mock };
   let prisma: {
     site: {
       create: jest.Mock;
@@ -26,8 +28,14 @@ describe('SitesService', () => {
       },
     };
 
+    realtime = { emitToCompany: jest.fn() };
+
     const module = await Test.createTestingModule({
-      providers: [SitesService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        SitesService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: RealtimeGateway, useValue: realtime },
+      ],
     }).compile();
 
     service = module.get(SitesService);
@@ -78,5 +86,26 @@ describe('SitesService', () => {
       NotFoundException,
     );
     expect(prisma.site.delete).not.toHaveBeenCalled();
+  });
+
+  it('notifies the company after create, update and remove', async () => {
+    prisma.site.create.mockResolvedValue({ id: 'site-1' });
+    prisma.site.findFirst.mockResolvedValue({ id: 'site-1' });
+    prisma.site.update.mockResolvedValue({ id: 'site-1' });
+
+    await service.create('company-a', { name: 'Site A' });
+    await service.update('company-a', 'site-1', { name: 'Site B' });
+    await service.remove('company-a', 'site-1');
+
+    expect(realtime.emitToCompany).toHaveBeenCalledTimes(3);
+    expect(realtime.emitToCompany).toHaveBeenCalledWith('company-a', 'sites:changed');
+  });
+
+  it('does not notify when the site belongs to another company', async () => {
+    prisma.site.findFirst.mockResolvedValue(null);
+
+    await expect(service.update('company-a', 'site-of-company-b', { name: 'x' })).rejects.toThrow();
+
+    expect(realtime.emitToCompany).not.toHaveBeenCalled();
   });
 });

@@ -1,10 +1,16 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Check, X } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { PendingShiftOffer, Site, User } from '@horaires/shared-types';
 import { ApiError } from '@horaires/api-client';
-import { apiClient, useAuth } from '../services/AuthService';
+import { apiClient } from '../services/AuthService';
+import { queryKeys, usePendingOffers, useSiteScope, useUsers } from '../lib/queries';
 import { Dialog } from '../components/Dialog';
+
+const NO_OFFERS: PendingShiftOffer[] = [];
+const NO_USERS: User[] = [];
+const NO_SITES: Site[] = [];
 
 // Page "Échanges à valider" : toutes les offres d'échange encore ouvertes du
 // marché de shifts, candidatures comprises — y compris celles sans aucun
@@ -13,52 +19,41 @@ import { Dialog } from '../components/Dialog';
 // une candidature. Plusieurs employés peuvent candidater sur la même entrée ;
 // le manager choisit lequel approuver dans le menu déroulant.
 export function ShiftApprovalPage() {
-  const { socket } = useAuth();
-  const [offers, setOffers] = useState<PendingShiftOffer[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [sites, setSites] = useState<Site[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+  // Un employé peut candidater (ou un autre manager valider/rejeter) pendant
+  // que cette page reste ouverte : le signal `shifts:changed` recharge les
+  // offres en cache (voir lib/queries.ts).
+  const offersQuery = usePendingOffers();
+  const usersQuery = useUsers();
+  const scopeQuery = useSiteScope();
+  const offers = offersQuery.data ?? NO_OFFERS;
+  const users = usersQuery.data ?? NO_USERS;
+  const sites = scopeQuery.data?.sites ?? NO_SITES;
+  const isLoading = offersQuery.isPending || usersQuery.isPending || scopeQuery.isPending;
   const [busyId, setBusyId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   // Candidat sélectionné dans le menu déroulant, par offre — par défaut le
-  // premier candidat s'il y en a (voir load()).
+  // premier candidat s'il y en a.
   const [selectedCandidate, setSelectedCandidate] = useState<Record<string, string>>({});
 
-  const load = useCallback(async () => {
-    const [offerList, userList, siteList] = await Promise.all([
-      apiClient.getPendingShiftOffers(),
-      apiClient.getUsers(),
-      apiClient.getSites(),
-    ]);
-    setUsers(userList);
-    setSites(siteList);
-    setOffers(offerList);
+  useEffect(() => {
     setSelectedCandidate((current) => {
       const next = { ...current };
-      for (const offer of offerList) {
+      for (const offer of offers) {
         if (!next[offer.id] && offer.candidates.length > 0) {
           next[offer.id] = offer.candidates[0].userId;
         }
       }
       return next;
     });
-    setIsLoading(false);
-  }, []);
+  }, [offers]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Un employé peut candidater (ou un autre manager valider/rejeter) pendant
-  // que cette page reste ouverte — voir realtime.gateway.ts.
-  useEffect(() => {
-    if (!socket) return;
-    const onShiftsChanged = () => void load();
-    socket.on('shifts:changed', onShiftsChanged);
-    return () => {
-      socket.off('shifts:changed', onShiftsChanged);
-    };
-  }, [socket, load]);
+  // Valider ou retirer une offre change aussi le planning (titulaire du shift).
+  const load = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.pendingOffers }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.shifts }),
+    ]);
 
   const approve = async (offer: PendingShiftOffer) => {
     const userId = selectedCandidate[offer.id];

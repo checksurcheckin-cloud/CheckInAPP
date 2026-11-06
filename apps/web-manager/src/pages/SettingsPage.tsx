@@ -1,24 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { MapPin, Smartphone } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
-import type { Company } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
+import { queryKeys, useCompany } from '../lib/queries';
 
 export function SettingsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const queryClient = useQueryClient();
 
-  const [company, setCompany] = useState<Company | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const companyQuery = useCompany();
+  const company = companyQuery.data ?? null;
+  const isLoading = companyQuery.isPending;
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    apiClient
-      .getMyCompany()
-      .then(setCompany)
-      .finally(() => setIsLoading(false));
-  }, []);
 
   const toggle = async (key: 'gpsClockInEnabled' | 'mobileClockInEnabled') => {
     if (!company || !isAdmin) return;
@@ -26,7 +22,7 @@ export function SettingsPage() {
     setIsSaving(true);
     try {
       const updated = await apiClient.updateCompanySettings({ [key]: !company[key] });
-      setCompany(updated);
+      queryClient.setQueryData(queryKeys.company, updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Échec de la mise à jour');
     } finally {

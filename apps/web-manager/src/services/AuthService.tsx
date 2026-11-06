@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { ApiClient, connectRealtime, type Socket } from '@horaires/api-client';
 import type { User } from '@horaires/shared-types';
+import { queryClient } from '../lib/queryClient';
 
 const ACCESS_TOKEN_KEY = 'horaires_access_token';
 const REFRESH_TOKEN_KEY = 'horaires_refresh_token';
@@ -37,6 +38,8 @@ function persistSession(accessToken: string, refreshToken: string, user: User) {
 
 function clearSession() {
   currentAccessToken = null;
+  // Rien du compte précédent ne doit rester affichable au suivant.
+  queryClient.clear();
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
@@ -93,6 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (response.user.role === 'employee') {
       throw new Error('Cet espace est réservé aux managers');
     }
+    queryClient.clear();
     persistSession(response.accessToken, response.refreshToken, response.user);
     setUser(response.user);
   }, []);

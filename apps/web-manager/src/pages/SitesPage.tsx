@@ -1,8 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { MapPin, Plus, Search, Trash2, Pencil, X } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { GeocodeCandidate, Site } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
+import { queryKeys, useSiteScope } from '../lib/queries';
+
+const NO_SITES: Site[] = [];
 
 type FormState = {
   name: string;
@@ -18,8 +22,10 @@ export function SitesPage() {
   // inutile de proposer à un manager un bouton qui finirait en 403.
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
-  const [sites, setSites] = useState<Site[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const sitesQuery = useSiteScope();
+  const sites = sitesQuery.data?.sites ?? NO_SITES;
+  const isLoading = sitesQuery.isPending;
 
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -29,18 +35,9 @@ export function SitesPage() {
   const [busySiteId, setBusySiteId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
-    setIsLoading(true);
-    try {
-      setSites(await apiClient.getSites());
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void load();
-  }, []);
+  // Liste partagée avec les sélecteurs de site des autres pages : la
+  // recharger ici les met à jour partout.
+  const load = () => queryClient.invalidateQueries({ queryKey: queryKeys.siteScope });
 
   const resetForm = () => {
     setEditingSiteId(null);

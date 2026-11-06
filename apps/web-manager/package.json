@@ -10,11 +10,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.1.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "@horaires/api-client": "workspace:*",
     "@horaires/shared-types": "workspace:*",
     "@horaires/ui-tokens": "workspace:*",
-    "@dnd-kit/core": "^6.1.0",
-    "@dnd-kit/utilities": "^3.2.2",
+    "@tanstack/react-query": "^5.107.0",
     "lucide-react": "^0.469.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",

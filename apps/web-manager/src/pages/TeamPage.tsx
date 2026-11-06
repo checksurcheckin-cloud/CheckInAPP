@@ -1,12 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { UserPlus, RefreshCw, KeyRound, Eye, EyeOff } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
-import type { Site, SiteScope, User, UserRole, UserStatus } from '@horaires/shared-types';
+import type { Site, User, UserRole, UserStatus } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
 import { SiteSelect } from '../components/SiteSelect';
 import { ManagedSitesDialog, managedSitesLabel } from '../components/ManagedSitesDialog';
-import { loadManagedSites } from '../lib/siteScope';
+import { queryKeys, useSiteScope, useUsers } from '../lib/queries';
 import { Dialog } from '../components/Dialog';
+
+const NO_USERS: User[] = [];
+const NO_SITES: Site[] = [];
 
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Admin',
@@ -23,9 +27,12 @@ const STATUS_LABELS: Record<UserStatus, string> = {
 export function TeamPage() {
   const { user: currentUser } = useAuth();
   const isAdmin = currentUser?.role === 'admin';
-  const [users, setUsers] = useState<User[]>([]);
-  const [sites, setSites] = useState<Site[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const usersQuery = useUsers();
+  const scopeQuery = useSiteScope();
+  const users = usersQuery.data ?? NO_USERS;
+  const sites = scopeQuery.data?.sites ?? NO_SITES;
+  const isLoading = usersQuery.isPending || scopeQuery.isPending;
   const [error, setError] = useState<string | null>(null);
 
   const [email, setEmail] = useState('');
@@ -47,39 +54,34 @@ export function TeamPage() {
   const [siteFilter, setSiteFilter] = useState('');
   // Périmètre de l'appelant (décision #36) : un manager limité ne voit que
   // les employés de ses magasins (et ceux pas encore rattachés).
-  const [scope, setScope] = useState<SiteScope | null>(null);
+  const scope = scopeQuery.data?.scope ?? null;
   const scoped = scope !== null && !scope.allSites;
   const [managedTarget, setManagedTarget] = useState<User | null>(null);
-  const [managedSiteIds, setManagedSiteIds] = useState<string[]>([]);
+  const managedSiteIds = useMemo(
+    () => (scopeQuery.data?.managedSites ?? NO_SITES).map((m) => m.id),
+    [scopeQuery.data],
+  );
   // Le filtre n'est posé sur le magasin du manager qu'au premier chargement,
   // pas à chaque rechargement après une action.
   const filterInitialized = useRef(false);
 
-  const load = async () => {
-    setIsLoading(true);
-    try {
-      const [list, managed] = await Promise.all([apiClient.getUsers(), loadManagedSites()]);
-      setUsers(list);
-      setSites(managed.sites);
-      setManagedSiteIds(managed.managedSites.map((m) => m.id));
-      setScope(managed.scope);
-      // Manager limité : on arrive sur la liste de son magasin, et un employé
-      // invité doit être rattaché à un de ses magasins (le backend le refuse
-      // sinon).
-      if (!managed.scope.allSites) {
-        const home = managed.managedSites[0]?.id ?? '';
-        setInviteSiteId((current) => current || home);
-        if (!filterInitialized.current) setSiteFilter(home);
-      }
-      filterInitialized.current = true;
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   useEffect(() => {
-    void load();
-  }, []);
+    const managed = scopeQuery.data;
+    if (!managed) return;
+    // Manager limité : on arrive sur la liste de son magasin, et un employé
+    // invité doit être rattaché à un de ses magasins (le backend le refuse
+    // sinon).
+    if (!managed.scope.allSites) {
+      const home = managed.managedSites[0]?.id ?? '';
+      setInviteSiteId((current) => current || home);
+      if (!filterInitialized.current) setSiteFilter(home);
+    }
+    filterInitialized.current = true;
+  }, [scopeQuery.data]);
+
+  // Après une action : l'annuaire en cache est partagé avec le planning et
+  // les échanges, qui se mettent à jour en même temps.
+  const load = () => queryClient.invalidateQueries({ queryKey: queryKeys.users });
 
   const invite = async (e: React.FormEvent) => {
     e.preventDefault();

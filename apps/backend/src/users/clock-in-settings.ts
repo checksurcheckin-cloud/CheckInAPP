@@ -25,3 +25,14 @@ export const CLOCK_IN_SETTINGS_SELECT = {
 
 export const MOBILE_CLOCK_IN_DISABLED_MESSAGE =
   'Le pointage par QR sur le téléphone est désactivé : utilisez votre PIN ou votre badge sur la tablette';
+
+// Une modification de surcharge qui (ré)active un pointage : surcharge
+// "activé" (true) ou retour au réglage entreprise (null, qui peut annuler une
+// désactivation posée par l'admin). Réservé à l'admin — décision #38.
+export function enablesClockIn(dto: {
+  gpsClockInEnabled?: boolean | null;
+  mobileClockInEnabled?: boolean | null;
+}): boolean {
+  const enables = (v: boolean | null | undefined) => v === true || v === null;
+  return enables(dto.gpsClockInEnabled) || enables(dto.mobileClockInEnabled);
+}

@@ -428,8 +428,10 @@ export function TeamPage() {
                       disabled={busyUserId === u.id || !canManage(u)}
                       onChange={(e) => changeClockInSetting(u.id, key, e.target.value as 'inherit' | 'on' | 'off')}
                     >
-                      <option value="inherit">Suit le réglage entreprise</option>
-                      <option value="on">Activé (surcharge)</option>
+                      {/* Réactiver (ou revenir au réglage entreprise) est
+                          réservé à l'admin — décision #38. */}
+                      <option value="inherit" disabled={!isAdmin}>Suit le réglage entreprise</option>
+                      <option value="on" disabled={!isAdmin}>Activé (surcharge)</option>
                       <option value="off">Désactivé (surcharge)</option>
                     </select>
                   </td>

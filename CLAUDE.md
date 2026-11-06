@@ -949,6 +949,16 @@ Cible : PME de 20-100 employés par site.
     `GET /sites` (annuaire), la présence de leurs magasins et l'appairage
     des tablettes (`/site-devices`, dans leur périmètre, décision #36).
 
+38. **Un manager peut couper le pointage (QR/GPS) d'un employé, jamais le
+    réactiver.** Dans Équipe, ses seuls choix sont « Désactivé (surcharge) »
+    ; « Activé » et « Suit le réglage entreprise » sont réservés à l'admin
+    — revenir au réglage entreprise pourrait annuler une désactivation
+    posée par l'admin, et l'origine d'une surcharge n'est pas mémorisée.
+    Appliqué côté backend : `PATCH /users/:id/settings` par un non-admin
+    avec `gpsClockInEnabled`/`mobileClockInEnabled` à `true` ou `null` =>
+    403 (`enablesClockIn`, `users/clock-in-settings.ts`). Les réglages
+    entreprise restent admin uniquement (décision #37).
+
 ## Stack
 
 - Backend : NestJS + PostgreSQL + Prisma + Passport/JWT

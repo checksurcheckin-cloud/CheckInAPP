@@ -1,5 +1,5 @@
 import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { MOBILE_CLOCK_IN_DISABLED_MESSAGE } from './clock-in-settings';
+import { MOBILE_CLOCK_IN_DISABLED_MESSAGE, enablesClockIn } from './clock-in-settings';
 import { ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { TenantScopeGuard } from '../auth/tenant-scope.guard';
@@ -163,6 +163,12 @@ export class UsersController {
   ) {
     await this.siteScope.ensureUser(user, id);
     if (dto.siteId) await this.siteScope.ensureSite(user, dto.siteId);
+    // Un manager peut couper le pointage (QR/GPS) d'un employé, jamais le
+    // réactiver : ni surcharge "activé", ni retour au réglage entreprise
+    // (qui pourrait annuler une désactivation posée par l'admin) — décision #38.
+    if (user.role !== 'admin' && enablesClockIn(dto)) {
+      throw new ForbiddenException('Seul un admin peut réactiver le pointage');
+    }
     return this.usersService.updateSettings(user.companyId, id, dto);
   }
 

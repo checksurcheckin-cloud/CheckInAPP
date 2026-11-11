@@ -11,6 +11,7 @@ import { ConfirmationBanner } from '../components/ConfirmationBanner';
 import { PersonalQrCode } from '../components/PersonalQrCode';
 import { PinFallbackNotice } from '../components/PinFallbackNotice';
 import { withPressedFeedback } from '../lib/pressedStyle';
+import { NotificationBell } from '../components/NotificationBell';
 import { useClockInSettings } from '../services/ClockInSettings';
 
 const ACTIONS: { type: TimeEntryType; label: string }[] = [
@@ -103,8 +104,11 @@ export function ClockInScreen() {
           </View>
           <Text style={styles.brandName}>Check In</Text>
         </View>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials(user?.firstName, user?.lastName)}</Text>
+        <View style={styles.headerActions}>
+          <NotificationBell />
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{initials(user?.firstName, user?.lastName)}</Text>
+          </View>
         </View>
       </View>
 
@@ -231,6 +235,7 @@ const styles = StyleSheet.create({
   content: { paddingTop: 28, paddingHorizontal: 24, paddingBottom: spacing.xl },
 
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   brandMark: {
     width: 34,

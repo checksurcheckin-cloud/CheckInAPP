@@ -1048,6 +1048,23 @@ reste "à faire".
   précédent). Pas de cache serveur (Redis) : inutile à cette échelle, risque
   de données périmées sur le pointage ; à reconsidérer avec plusieurs
   instances du backend.
+- **Notifications (cloche de checkin-mobile)** : table `notifications`,
+  `NotificationsModule` (`GET /notifications`, `POST /notifications/:id/read`,
+  `POST /notifications/read-all`, toujours sur l'appelant). Trois types,
+  déclenchés par `ShiftsService` APRÈS l'action : `shift_assigned` (assignation
+  d'un shift déjà publié, ou publication d'un brouillon déjà assigné — jamais
+  pendant le travail sur un brouillon), `application_accepted` (validation d'un
+  échange ou d'une candidature sur créneau libre — remplace `shift_assigned`,
+  pas les deux), `shift_available` (créneau libre publié / reproposé : son
+  public de marché via `market-audience.ts` ; offre d'échange : toute
+  l'entreprise sauf celui qui cède). Destinataires : employés actifs seulement,
+  sans ceux qui travaillent déjà sur ce créneau. Les `notify*` ne lèvent jamais
+  d'exception (une notification ratée ne fait pas échouer l'action). Titre et
+  texte rédigés côté backend en français, à l'heure du site. Temps réel :
+  room `user:<id>` (RealtimeGateway.emitToUser), événement
+  `notifications:changed` reçu seulement par le destinataire. Étape suivante
+  prévue : notifications push (expo-notifications + EAS Build — Expo Go ne
+  reçoit plus de push sur Android).
 
 **Connu manquant / dette identifiée** :
 1. Pas de révocation de session côté backend (voir logout ci-dessus) — à

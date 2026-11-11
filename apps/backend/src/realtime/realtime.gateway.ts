@@ -53,6 +53,9 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     try {
       const payload = this.jwt.verify<JwtPayload>(token);
       void client.join(`company:${payload.companyId}`);
+      // Room personnelle, pour ce qui ne concerne qu'un seul utilisateur
+      // (ses notifications) — voir emitToUser.
+      void client.join(`user:${payload.sub}`);
     } catch {
       client.disconnect(true);
     }
@@ -70,6 +73,14 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       // Ne jamais faire échouer la mutation HTTP qui a déclenché cet envoi à
       // cause d'un souci purement websocket (client déconnecté, etc.).
       this.logger.warn(`Échec d'émission "${event}" pour company:${companyId}: ${err}`);
+    }
+  }
+
+  emitToUser(userId: string, event: string, payload: unknown = {}) {
+    try {
+      this.server?.to(`user:${userId}`).emit(event, payload);
+    } catch (err) {
+      this.logger.warn(`Échec d'émission "${event}" pour user:${userId}: ${err}`);
     }
   }
 }

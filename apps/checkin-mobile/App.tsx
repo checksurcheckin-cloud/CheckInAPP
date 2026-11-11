@@ -10,6 +10,7 @@ import { colors } from '@horaires/ui-tokens';
 import { AuthProvider, useAuth } from './src/services/AuthService';
 import { FloatingTabBar } from './src/components/FloatingTabBar';
 import { ClockInSettingsProvider, useClockInSettings } from './src/services/ClockInSettings';
+import { NotificationsProvider } from './src/services/Notifications';
 
 // Écrans partagés (staff + manager)
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -18,6 +19,7 @@ import { AvailabilitiesScreen } from './src/screens/AvailabilitiesScreen';
 import { ShiftMarketplaceScreen } from './src/screens/ShiftMarketplaceScreen';
 import { PlanningScreen } from './src/screens/PlanningScreen'; // lecture seule
 import { ProfileScreen } from './src/screens/ProfileScreen';
+import { NotificationsScreen } from './src/screens/NotificationsScreen';
 
 // Écrans manager uniquement
 
@@ -71,14 +73,20 @@ function RootNavigator() {
     );
   }
 
+  // La cloche des en-têtes et l'écran Notifications lisent le même état.
   return (
-    <Stack.Navigator>
-      {!user ? (
-        <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-      ) : (
-        <Stack.Screen name="Main" component={MainWithSettings} options={{ headerShown: false }} />
-      )}
-    </Stack.Navigator>
+    <NotificationsProvider>
+      <Stack.Navigator>
+        {!user ? (
+          <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+        ) : (
+          <>
+            <Stack.Screen name="Main" component={MainWithSettings} options={{ headerShown: false }} />
+            <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ headerShown: false }} />
+          </>
+        )}
+      </Stack.Navigator>
+    </NotificationsProvider>
   );
 }
 

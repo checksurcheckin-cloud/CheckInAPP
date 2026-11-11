@@ -1,7 +1,9 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthenticatedUser } from '../auth/current-user.decorator';
+import { isInMarketAudience, marketAudienceWhere } from './market-audience';
 import { CreateShiftDto } from './dto/create-shift.dto';
 import { UpdateShiftDto } from './dto/update-shift.dto';
 import { AssignShiftDto } from './dto/assign-shift.dto';
@@ -14,6 +16,7 @@ export class ShiftsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async create(companyId: string, createdBy: string, dto: CreateShiftDto) {
@@ -46,6 +49,12 @@ export class ShiftsService {
     // autres managers pendant qu'eux-mêmes glissent-déposent. Seul le
     // passage explicite à "published" (voir update()) prévient les autres
     // clients.
+    //
+    // Exception : créé directement publié (duplication d'un shift publié),
+    // il apparaît tout de suite sur le marché — on prévient son public.
+    if (shift.status === 'published') {
+      await this.notifications.notifyOpenShiftAvailable(companyId, shift.id);
+    }
     return shift;
   }
 
@@ -263,6 +272,16 @@ export class ShiftsService {
     if (dto.status === 'published') {
       this.realtime.emitToCompany(companyId, 'shifts:changed');
     }
+    // Brouillon qui devient visible des employés : son titulaire le découvre
+    // dans son planning, ou, sans titulaire, il arrive sur le marché.
+    if (dto.status === 'published' && existing.status !== 'published') {
+      const holder = existing.assignments.find((a) => a.status !== 'cancelled');
+      if (holder) {
+        await this.notifications.notifyShiftAssigned(companyId, id, holder.userId);
+      } else {
+        await this.notifications.notifyOpenShiftAvailable(companyId, id);
+      }
+    }
     return shift;
   }
 
@@ -293,8 +312,9 @@ export class ShiftsService {
     // d'émission en direct pour autant.
   }
 
-  // Un shift = un seul employé assigné à la fois.
-  async assign(companyId: string, shiftId: string, dto: AssignShiftDto) {
+  // Un shift = un seul employé assigné à la fois. `notify: false` quand
+  // l'appelant envoie sa propre notification (approveOpenShift).
+  async assign(companyId: string, shiftId: string, dto: AssignShiftDto, { notify = true }: { notify?: boolean } = {}) {
     const shift = await this.findOne(companyId, shiftId);
     // Un shift en cours reste assignable (remplacement de dernière minute) ;
     // un shift terminé non : la régularisation passe par un pointage manuel,
@@ -333,6 +353,12 @@ export class ShiftsService {
     // planning (souvent sur un brouillon) — pas d'émission ici, seule la
     // publication (update() avec status: 'published') prévient les autres
     // clients. Voir CLAUDE.md décision #23.
+    //
+    // Sur un shift déjà publié, l'employé le voit tout de suite dans son
+    // planning : on le prévient. Un brouillon le sera à sa publication.
+    if (notify && shift.status === 'published') {
+      await this.notifications.notifyShiftAssigned(companyId, shiftId, dto.userId);
+    }
     return assignment;
   }
 
@@ -358,6 +384,7 @@ export class ShiftsService {
     ]);
 
     this.realtime.emitToCompany(companyId, 'shifts:changed');
+    await this.notifications.notifySwapAvailable(companyId, assignment.shiftId, employee.userId);
     return offer;
   }
 
@@ -445,6 +472,7 @@ export class ShiftsService {
     ]);
 
     this.realtime.emitToCompany(companyId, 'shifts:changed');
+    await this.notifications.notifyApplicationAccepted(companyId, offer.shiftAssignment.shiftId, dto.userId);
     return updatedOffer;
   }
 
@@ -527,8 +555,9 @@ export class ShiftsService {
       throw new NotFoundException("Cet employé n'a pas candidaté pour ce créneau");
     }
 
-    const assignment = await this.assign(companyId, shiftId, { userId: dto.userId });
+    const assignment = await this.assign(companyId, shiftId, { userId: dto.userId }, { notify: false });
     this.realtime.emitToCompany(companyId, 'shifts:changed');
+    await this.notifications.notifyApplicationAccepted(companyId, shiftId, dto.userId);
     return assignment;
   }
 
@@ -594,6 +623,9 @@ export class ShiftsService {
     }
 
     this.realtime.emitToCompany(companyId, 'shifts:changed');
+    // Ceux qui ont déjà candidaté (et restent dans le public) le savent.
+    const stillApplied = applications.filter((a) => !outOfAudience.includes(a.id)).map((a) => a.userId);
+    await this.notifications.notifyOpenShiftAvailable(companyId, shiftId, stillApplied);
     return updated;
   }
 
@@ -799,38 +831,6 @@ function zonedParts(
 function ensureNotEnded(endsAt: Date, message: string) {
   if (endsAt.getTime() <= Date.now()) {
     throw new ConflictException(message);
-  }
-}
-
-// Public d'un créneau libre (décision #33), en deux versions qui doivent
-// rester identiques : filtre Prisma (liste du marché) et test en mémoire
-// (candidature). Un employé sans site voit les créneaux "son magasin" et
-// "sites précis" de tous les sites, comme partout ailleurs (décision #25).
-function marketAudienceWhere(userId: string, siteId: string | null) {
-  return {
-    OR: [
-      { marketScope: 'site' as const, ...(siteId ? { siteId } : {}) },
-      { marketScope: 'all_sites' as const },
-      { marketScope: 'sites' as const, ...(siteId ? { marketSiteIds: { has: siteId } } : {}) },
-      { marketScope: 'employees' as const, marketUserIds: { has: userId } },
-    ],
-  };
-}
-
-function isInMarketAudience(
-  shift: { siteId: string; marketScope: string; marketSiteIds: string[]; marketUserIds: string[] },
-  userId: string,
-  siteId: string | null,
-): boolean {
-  switch (shift.marketScope) {
-    case 'all_sites':
-      return true;
-    case 'sites':
-      return !siteId || shift.marketSiteIds.includes(siteId);
-    case 'employees':
-      return shift.marketUserIds.includes(userId);
-    default:
-      return !siteId || shift.siteId === siteId;
   }
 }
 

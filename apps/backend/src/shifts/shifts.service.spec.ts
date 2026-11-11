@@ -2,11 +2,18 @@ import { Test } from '@nestjs/testing';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ShiftsService } from './shifts.service';
 
 describe('ShiftsService', () => {
   let service: ShiftsService;
   let realtime: { emitToCompany: jest.Mock };
+  let notifications: {
+    notifyShiftAssigned: jest.Mock;
+    notifyApplicationAccepted: jest.Mock;
+    notifyOpenShiftAvailable: jest.Mock;
+    notifySwapAvailable: jest.Mock;
+  };
   let prisma: {
     site: { findFirst: jest.Mock; count: jest.Mock };
     user: { findFirst: jest.Mock; count: jest.Mock };
@@ -92,12 +99,19 @@ describe('ShiftsService', () => {
       $transaction: jest.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
     };
     realtime = { emitToCompany: jest.fn() };
+    notifications = {
+      notifyShiftAssigned: jest.fn(),
+      notifyApplicationAccepted: jest.fn(),
+      notifyOpenShiftAvailable: jest.fn(),
+      notifySwapAvailable: jest.fn(),
+    };
 
     const module = await Test.createTestingModule({
       providers: [
         ShiftsService,
         { provide: PrismaService, useValue: prisma },
         { provide: RealtimeGateway, useValue: realtime },
+        { provide: NotificationsService, useValue: notifications },
       ],
     }).compile();
 
@@ -1352,6 +1366,127 @@ describe('ShiftsService', () => {
 
       await expect(service.applyToOpenShift('company-a', employee, 'open-1')).rejects.toThrow(ForbiddenException);
       expect(prisma.shiftApplication.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('notifications', () => {
+    const START = new Date('2026-09-01T08:00:00.000Z');
+    const END = new Date('2026-09-01T16:00:00.000Z');
+    const draft = { id: 'shift-1', siteId: 'site-1', startsAt: START, endsAt: END, status: 'draft', assignments: [] };
+
+    beforeEach(() => {
+      prisma.site.findFirst.mockResolvedValue({ id: 'site-1', timezone: 'UTC' });
+      prisma.availability.findFirst.mockResolvedValue(null);
+      prisma.shiftAssignment.findFirst.mockResolvedValue(null);
+    });
+
+    it('notifies the holder when an assigned draft is published', async () => {
+      prisma.shift.findFirst.mockResolvedValue({ ...draft, assignments: [{ userId: 'user-1', status: 'assigned' }] });
+      prisma.shift.update.mockResolvedValue({ ...draft, status: 'published' });
+
+      await service.update('company-a', 'shift-1', { status: 'published' });
+
+      expect(notifications.notifyShiftAssigned).toHaveBeenCalledWith('company-a', 'shift-1', 'user-1');
+      expect(notifications.notifyOpenShiftAvailable).not.toHaveBeenCalled();
+    });
+
+    it('announces a published draft without holder to its market audience', async () => {
+      prisma.shift.findFirst.mockResolvedValue(draft);
+      prisma.shift.update.mockResolvedValue({ ...draft, status: 'published' });
+
+      await service.update('company-a', 'shift-1', { status: 'published' });
+
+      expect(notifications.notifyOpenShiftAvailable).toHaveBeenCalledWith('company-a', 'shift-1');
+      expect(notifications.notifyShiftAssigned).not.toHaveBeenCalled();
+    });
+
+    it('stays silent when an already published shift is saved again, or a draft is edited', async () => {
+      prisma.shift.findFirst.mockResolvedValue({ ...draft, status: 'published' });
+      prisma.shift.update.mockResolvedValue({ ...draft, status: 'published' });
+      await service.update('company-a', 'shift-1', { status: 'published' });
+
+      prisma.shift.findFirst.mockResolvedValue(draft);
+      prisma.shift.update.mockResolvedValue(draft);
+      await service.update('company-a', 'shift-1', { roleNeeded: 'Caisse' });
+
+      expect(notifications.notifyShiftAssigned).not.toHaveBeenCalled();
+      expect(notifications.notifyOpenShiftAvailable).not.toHaveBeenCalled();
+    });
+
+    it('notifies the employee assigned to a published shift, but not to a draft', async () => {
+      prisma.user.findFirst.mockResolvedValue({ id: 'user-1' });
+      prisma.shiftAssignment.create.mockResolvedValue({ id: 'assignment-1' });
+
+      prisma.shift.findFirst.mockResolvedValue(draft);
+      await service.assign('company-a', 'shift-1', { userId: 'user-1' });
+      expect(notifications.notifyShiftAssigned).not.toHaveBeenCalled();
+
+      prisma.shift.findFirst.mockResolvedValue({ ...draft, status: 'published' });
+      await service.assign('company-a', 'shift-1', { userId: 'user-1' });
+      expect(notifications.notifyShiftAssigned).toHaveBeenCalledWith('company-a', 'shift-1', 'user-1');
+    });
+
+    it('sends only "application accepted" when a manager picks an applicant for an open shift', async () => {
+      prisma.shiftApplication.findFirst.mockResolvedValue({ id: 'app-1' });
+      prisma.shift.findFirst.mockResolvedValue({ ...draft, status: 'published' });
+      prisma.user.findFirst.mockResolvedValue({ id: 'user-1' });
+      prisma.shiftAssignment.create.mockResolvedValue({ id: 'assignment-1' });
+
+      await service.approveOpenShift('company-a', 'shift-1', { userId: 'user-1' });
+
+      expect(notifications.notifyApplicationAccepted).toHaveBeenCalledWith('company-a', 'shift-1', 'user-1');
+      expect(notifications.notifyShiftAssigned).not.toHaveBeenCalled();
+    });
+
+    it('tells the chosen candidate of a swap that their application was accepted', async () => {
+      prisma.shiftOffer.findFirst.mockResolvedValue({
+        id: 'offer-1',
+        status: 'open',
+        shiftAssignmentId: 'assignment-1',
+        shiftAssignment: { shiftId: 'shift-1', shift: { startsAt: START, endsAt: END } },
+      });
+      prisma.shiftOfferCandidate.findFirst.mockResolvedValue({ id: 'candidate-1', userId: 'user-2' });
+
+      await service.approveOffer('company-a', 'offer-1', { userId: 'user-2' });
+
+      expect(notifications.notifyApplicationAccepted).toHaveBeenCalledWith('company-a', 'shift-1', 'user-2');
+    });
+
+    it('announces a shift handed over by a colleague, excluding that colleague', async () => {
+      prisma.shiftAssignment.findFirst.mockResolvedValue({
+        id: 'assignment-1',
+        shiftId: 'shift-1',
+        userId: 'user-1',
+        status: 'assigned',
+        shift: { endsAt: END },
+      });
+      prisma.shiftOffer.create.mockResolvedValue({ id: 'offer-1' });
+
+      await service.offerAssignment('company-a', { userId: 'user-1', companyId: 'company-a', role: 'employee' }, 'assignment-1');
+
+      expect(notifications.notifySwapAvailable).toHaveBeenCalledWith('company-a', 'shift-1', 'user-1');
+    });
+
+    it('announces a slot proposed on the market, except to those who already applied', async () => {
+      const open = { ...draft, status: 'published', marketScope: 'site', marketSiteIds: [], marketUserIds: [] };
+      prisma.shift.findFirst.mockResolvedValue(open);
+      prisma.shift.update.mockImplementation(({ data }) => Promise.resolve({ ...open, ...data }));
+      prisma.shiftApplication.findMany.mockResolvedValue([{ id: 'app-1', userId: 'user-3', user: { siteId: 'site-1' } }]);
+
+      await service.proposeOnMarket('company-a', 'shift-1', { scope: 'all_sites' });
+
+      expect(notifications.notifyOpenShiftAvailable).toHaveBeenCalledWith('company-a', 'shift-1', ['user-3']);
+    });
+
+    it('announces a shift created already published, not a new draft', async () => {
+      const dto = { siteId: 'site-1', startsAt: START.toISOString(), endsAt: END.toISOString() };
+      prisma.shift.create.mockResolvedValueOnce({ ...draft });
+      await service.create('company-a', 'manager-1', dto);
+      expect(notifications.notifyOpenShiftAvailable).not.toHaveBeenCalled();
+
+      prisma.shift.create.mockResolvedValueOnce({ ...draft, id: 'shift-2', status: 'published' });
+      await service.create('company-a', 'manager-1', { ...dto, status: 'published' });
+      expect(notifications.notifyOpenShiftAvailable).toHaveBeenCalledWith('company-a', 'shift-2');
     });
   });
 });

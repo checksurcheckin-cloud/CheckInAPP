@@ -11,6 +11,7 @@ import { AvailabilitiesModule } from './availabilities/availabilities.module';
 import { GeocodingModule } from './geocoding/geocoding.module';
 import { SiteScopeModule } from './site-scope/site-scope.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     ShiftsModule,
     AvailabilitiesModule,
     GeocodingModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}

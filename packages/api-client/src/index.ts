@@ -7,6 +7,7 @@ import type {
   DeviceAuthResponse,
   DeviceTimeEntryResult,
   KioskEmployee,
+  NotificationList,
   UserPin,
   GeocodeCandidate,
   OpenShiftOffer,
@@ -449,5 +450,18 @@ export class ApiClient {
 
   deleteAvailability(id: string) {
     return this.request<void>('DELETE', `/availabilities/${id}`);
+  }
+
+  // ---- Notifications (toujours celles de l'utilisateur connecté) ----
+  getNotifications() {
+    return this.request<NotificationList>('GET', '/notifications');
+  }
+
+  markNotificationRead(id: string) {
+    return this.request<void>('POST', `/notifications/${id}/read`);
+  }
+
+  markAllNotificationsRead() {
+    return this.request<void>('POST', '/notifications/read-all');
   }
 }

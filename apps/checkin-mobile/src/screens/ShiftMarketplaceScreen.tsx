@@ -7,6 +7,7 @@ import type { Availability, OpenShiftOffer, Shift, ShiftAssignment, Site, User }
 import { apiClient, useAuth } from '../services/AuthService';
 import { ConfirmationBanner } from '../components/ConfirmationBanner';
 import { fonts } from '../theme';
+import { NotificationBell } from '../components/NotificationBell';
 import { findBlockingUnavailability, toDateOnlyString, type BlockingUnavailability } from '../lib/unavailability';
 
 type OwnAssignment = { kind: 'own'; id: string; shift: Shift; assignment: ShiftAssignment };
@@ -391,10 +392,13 @@ export function ShiftMarketplaceScreen() {
         <View style={styles.px}>
           <View style={styles.headerRow}>
             <Text style={styles.title}>Marché de shifts</Text>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {`${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()}
-              </Text>
+            <View style={styles.headerActions}>
+              <NotificationBell />
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>
+                  {`${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()}
+                </Text>
+              </View>
             </View>
           </View>
 
@@ -512,6 +516,7 @@ const styles = StyleSheet.create({
   pxMargin: { marginHorizontal: 20 },
 
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   title: { fontFamily: fonts.display, fontSize: 24, color: colors.textPrimary, letterSpacing: -0.2 },
   avatar: {
     width: 40,

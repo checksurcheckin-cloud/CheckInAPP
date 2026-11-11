@@ -67,6 +67,12 @@ enum TimeEntrySource {
   manual_by_manager
 }
 
+enum NotificationType {
+  shift_assigned
+  application_accepted
+  shift_available
+}
+
 // ---------- MODELS ----------
 
 model Company {
@@ -166,6 +172,7 @@ model User {
   managedSites          ManagedSite[]
   availabilities      Availability[]
   auditLogs           AuditLog[]
+  notifications       Notification[]
 
   @@map("users")
 }
@@ -322,4 +329,23 @@ model AuditLog {
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("audit_logs")
+}
+
+// Notification destinée à un utilisateur (cloche de checkin-mobile, voir
+// NotificationsService). Titre et texte sont figés à l'envoi : ils décrivent
+// le shift tel qu'il était à ce moment-là. `shiftId` sans clé étrangère : le
+// shift peut être supprimé ensuite sans emporter l'historique.
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  user      User             @relation(fields: [userId], references: [id])
+  type      NotificationType
+  title     String
+  body      String
+  shiftId   String?          @map("shift_id")
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  @@index([userId, createdAt])
+  @@map("notifications")
 }

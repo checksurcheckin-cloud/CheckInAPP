@@ -8,6 +8,7 @@ import type { Availability } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
 import { ConfirmationBanner } from '../components/ConfirmationBanner';
 import { fonts } from '../theme';
+import { NotificationBell } from '../components/NotificationBell';
 
 const DAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
 const MONTHS = [
@@ -403,10 +404,13 @@ export function AvailabilitiesScreen() {
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>Disponibilités</Text>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {`${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()}
-          </Text>
+        <View style={styles.headerActions}>
+          <NotificationBell />
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>
+              {`${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()}
+            </Text>
+          </View>
         </View>
       </View>
       <View style={styles.weekNav}>
@@ -617,6 +621,7 @@ export function AvailabilitiesScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, paddingTop: 28, paddingHorizontal: 24 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   title: { fontFamily: fonts.display, fontSize: 24, color: colors.textPrimary, letterSpacing: -0.2 },
   avatar: {
     width: 40,

@@ -260,3 +260,24 @@ export interface PresentEmployee {
   // null si source !== 'gps', ou si le site n'a pas de coordonnées déclarées.
   distanceFromSiteMeters: number | null;
 }
+
+// Notification de la cloche (checkin-mobile). Titre et texte sont rédigés
+// par le backend à l'envoi, en français, prêts à afficher.
+export type NotificationType = 'shift_assigned' | 'application_accepted' | 'shift_available';
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  shiftId: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationList {
+  // Les 50 plus récentes.
+  items: AppNotification[];
+  unreadCount: number;
+}

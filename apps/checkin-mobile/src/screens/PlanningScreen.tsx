@@ -6,6 +6,7 @@ import { colors, spacing } from '@horaires/ui-tokens';
 import type { Shift, Site } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
 import { fonts } from '../theme';
+import { NotificationBell } from '../components/NotificationBell';
 
 const STATUS_LABELS: Record<string, string> = {
   assigned: 'Assigné',
@@ -214,10 +215,13 @@ export function PlanningScreen() {
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>Planning</Text>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {`${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()}
-          </Text>
+        <View style={styles.headerActions}>
+          <NotificationBell />
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>
+              {`${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -295,6 +299,7 @@ export function PlanningScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background, paddingTop: 28, paddingHorizontal: 24 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   title: { fontFamily: fonts.display, fontSize: 24, color: colors.textPrimary, letterSpacing: -0.2 },
   avatar: {
     width: 40,

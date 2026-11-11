@@ -15,7 +15,7 @@
     "@horaires/api-client": "workspace:*",
     "@horaires/shared-types": "workspace:*",
     "@horaires/ui-tokens": "workspace:*",
-    "@tanstack/react-query": "^5.107.0",
+    "@tanstack/react-query": "^5.107.1",
     "lucide-react": "^0.469.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",

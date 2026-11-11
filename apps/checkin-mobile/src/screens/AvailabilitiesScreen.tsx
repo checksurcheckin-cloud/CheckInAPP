@@ -1,11 +1,15 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet, RefreshControl, ActivityIndicator, Modal } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import { useQueryClient } from '@tanstack/react-query';
 import { colors, spacing, radius, nativeShadow } from '@horaires/ui-tokens';
 import type { Availability } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
+import { queryKeys, useManualRefresh, useMyAvailabilities, useRefreshOnFocus } from '../lib/queries';
+
+const NO_AVAILABILITIES: Availability[] = [];
+const REFRESHED_KEYS = [queryKeys.myAvailabilities];
 import { ConfirmationBanner } from '../components/ConfirmationBanner';
 import { fonts } from '../theme';
 import { NotificationBell } from '../components/NotificationBell';
@@ -154,7 +158,12 @@ export function AvailabilitiesScreen() {
   const { user } = useAuth();
   const [weekStart, setWeekStart] = useState(() => getWeekStart());
   const weekDates = useMemo(() => DAYS.map((_, i) => addDays(weekStart, i)), [weekStart]);
-  const [availabilities, setAvailabilities] = useState<Availability[]>([]);
+  // Depuis le cache (hors ligne compris), rechargé à chaque
+  // `availabilities:changed`.
+  const availabilities = useMyAvailabilities(user?.id).data ?? NO_AVAILABILITIES;
+  const queryClient = useQueryClient();
+  useRefreshOnFocus(REFRESHED_KEYS);
+  const refreshNow = useManualRefresh(REFRESHED_KEYS);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [busyDay, setBusyDay] = useState<number | null>(null);
   const [editingDay, setEditingDay] = useState<number | null>(null);
@@ -166,24 +175,13 @@ export function AvailabilitiesScreen() {
   // avant de le remettre disponible — voir toggleDay.
   const [recurringPromptDay, setRecurringPromptDay] = useState<number | null>(null);
 
-  const load = useCallback(async () => {
-    // userId explicite : sans lui, un manager recevrait les dispos de toute
-    // l'entreprise (le serveur ne restreint d'office que les employés) et
-    // l'écran les mélangerait avec les siennes.
-    if (!user) return;
-    const list = await apiClient.getAvailabilities(user.id);
-    setAvailabilities(list);
-  }, [user]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
+  // Après une modification : recharge mes dispos (le marché, qui les lit
+  // aussi, suit puisqu'il partage le même cache).
+  const load = () => queryClient.invalidateQueries({ queryKey: queryKeys.myAvailabilities });
 
   const refresh = async () => {
     setIsRefreshing(true);
-    await load().catch(() => {});
+    await refreshNow().catch(() => {});
     setIsRefreshing(false);
   };
 

@@ -9,6 +9,7 @@ import * as SecureStore from 'expo-secure-store';
 import { ApiClient, connectRealtime, type Socket } from '@horaires/api-client';
 import type { User } from '@horaires/shared-types';
 import { unregisterPush } from './PushNotifications';
+import { clearQueryCache } from '../lib/queryClient';
 
 const ACCESS_TOKEN_KEY = 'horaires_access_token';
 const REFRESH_TOKEN_KEY = 'horaires_refresh_token';
@@ -84,6 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // à recevoir les push de ce compte après la déconnexion.
     await unregisterPush(apiClient);
     await clearSession();
+    await clearQueryCache();
     setUser(null);
   }, []);
 
@@ -117,6 +119,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const response = await apiClient.login(email, password);
+    await clearQueryCache();
     await persistSession(response.accessToken, response.refreshToken, response.user);
     setUser(response.user);
   }, []);

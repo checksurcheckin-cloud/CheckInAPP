@@ -1,10 +1,20 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet, RefreshControl, ActivityIndicator, Modal } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, shiftPalette } from '@horaires/ui-tokens';
 import type { Availability, OpenShiftOffer, Shift, ShiftAssignment, Site, User } from '@horaires/shared-types';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiClient, useAuth } from '../services/AuthService';
+import {
+  queryKeys,
+  useManualRefresh,
+  useMyAvailabilities,
+  useMyShifts,
+  useOpenOffers,
+  useRefreshOnFocus,
+  useSites,
+  useUsers,
+} from '../lib/queries';
 import { ConfirmationBanner } from '../components/ConfirmationBanner';
 import { fonts } from '../theme';
 import { NotificationBell } from '../components/NotificationBell';
@@ -16,6 +26,17 @@ type OwnAssignment = { kind: 'own'; id: string; shift: Shift; assignment: ShiftA
 type OpenOffer = { kind: 'offer'; id: string; shift: Shift; hasApplied: boolean; entry: OpenShiftOffer };
 type Row = OwnAssignment | OpenOffer;
 type Segment = 'available' | 'mine';
+
+const NO_USERS: User[] = [];
+const NO_SITES: Site[] = [];
+const NO_AVAILABILITIES: Availability[] = [];
+const REFRESHED_KEYS = [
+  queryKeys.myShifts,
+  queryKeys.openOffers,
+  queryKeys.users,
+  queryKeys.sites,
+  queryKeys.myAvailabilities,
+];
 
 function initials(name: string) {
   return name
@@ -62,18 +83,25 @@ function relativeDayLabel(iso: string) {
 // filtre par site : sur un marché ouvert à plusieurs magasins, « où » compte
 // autant que « quand ».
 export function ShiftMarketplaceScreen() {
-  const { user, socket } = useAuth();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [segment, setSegment] = useState<Segment>('available');
   const [siteFilter, setSiteFilter] = useState<string | null>(null);
-  const [ownAssignments, setOwnAssignments] = useState<OwnAssignment[]>([]);
-  const [openOffers, setOpenOffers] = useState<OpenOffer[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [sites, setSites] = useState<Site[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // Depuis le cache, rechargé à chaque `shifts:changed` : une offre peut
+  // trouver preneur, être validée/rejetée, ou un collègue candidater pendant
+  // que l'écran reste ouvert.
+  const myShiftsQuery = useMyShifts();
+  const openOffersQuery = useOpenOffers();
+  const users = useUsers().data ?? NO_USERS;
+  const sites = useSites().data ?? NO_SITES;
+  // Toujours "les miennes", même pour un manager (décision #31).
+  const availabilities = useMyAvailabilities(user?.id).data ?? NO_AVAILABILITIES;
+  const isLoading = myShiftsQuery.isPending || openOffersQuery.isPending;
+  useRefreshOnFocus(REFRESHED_KEYS);
+  const refreshNow = useManualRefresh(REFRESHED_KEYS);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [banner, setBanner] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
-  const [availabilities, setAvailabilities] = useState<Availability[]>([]);
   // Shift qu'on veut prendre un jour où l'on s'est déclaré indisponible :
   // on demande d'abord s'il faut lever l'indisponibilité ce jour-là.
   const [unavailablePrompt, setUnavailablePrompt] = useState<{
@@ -81,25 +109,13 @@ export function ShiftMarketplaceScreen() {
     blocking: BlockingUnavailability;
   } | null>(null);
 
-  const load = useCallback(async () => {
-    const [shifts, offers, userList, siteList, availabilityList] = await Promise.all([
-      apiClient.getShifts({ mine: true }),
-      apiClient.getOpenShiftOffers(),
-      apiClient.getUsers(),
-      apiClient.getSites(),
-      // Toujours "les miennes", même pour un manager (décision #31).
-      user?.id ? apiClient.getAvailabilities(user.id) : Promise.resolve([] as Availability[]),
-    ]);
-    setAvailabilities(availabilityList);
-    setUsers(userList);
-    setSites(siteList);
-
-    // "Mes échanges" : mes propres shifts à venir, déjà proposés ou non.
-    // getShifts ne renvoie que mes shifts, d'où le scan local. Un shift
-    // terminé ne se propose plus (refusé par l'API, décision #32).
+  // "Mes échanges" : mes propres shifts à venir, déjà proposés ou non.
+  // getShifts ne renvoie que mes shifts, d'où le scan local. Un shift
+  // terminé ne se propose plus (refusé par l'API, décision #32).
+  const ownAssignments = useMemo(() => {
     const mine: OwnAssignment[] = [];
     const now = Date.now();
-    for (const shift of shifts) {
+    for (const shift of myShiftsQuery.data ?? []) {
       if (new Date(shift.endsAt).getTime() <= now) continue;
       for (const assignment of shift.assignments ?? []) {
         if (assignment.userId === user?.id && (assignment.status === 'assigned' || assignment.status === 'offered')) {
@@ -107,37 +123,28 @@ export function ShiftMarketplaceScreen() {
         }
       }
     }
-    mine.sort((a, b) => a.shift.startsAt.localeCompare(b.shift.startsAt));
-    setOwnAssignments(mine);
+    return mine.sort((a, b) => a.shift.startsAt.localeCompare(b.shift.startsAt));
+  }, [myShiftsQuery.data, user?.id]);
 
-    // "Disponibles" : offres ouvertes des collègues et créneaux libres, via
-    // l'endpoint dédié (l'API exclut déjà mes propres offres et ce qui
-    // chevauche un de mes shifts).
-    setOpenOffers(offers.map((o) => ({ kind: 'offer', id: o.id, shift: o.shift, hasApplied: o.hasApplied, entry: o })));
-  }, [user?.id]);
-
-  useFocusEffect(
-    useCallback(() => {
-      load()
-        .catch(() => {})
-        .finally(() => setIsLoading(false));
-    }, [load]),
+  // "Disponibles" : offres ouvertes des collègues et créneaux libres, via
+  // l'endpoint dédié (l'API exclut déjà mes propres offres et ce qui
+  // chevauche un de mes shifts).
+  const openOffers = useMemo<OpenOffer[]>(
+    () =>
+      (openOffersQuery.data ?? []).map((o) => ({ kind: 'offer', id: o.id, shift: o.shift, hasApplied: o.hasApplied, entry: o })),
+    [openOffersQuery.data],
   );
 
-  // Une offre peut trouver preneur, être validée/rejetée, ou un nouveau
-  // collègue peut candidater pendant que cet écran reste ouvert.
-  useEffect(() => {
-    if (!socket) return;
-    const onShiftsChanged = () => void load();
-    socket.on('shifts:changed', onShiftsChanged);
-    return () => {
-      socket.off('shifts:changed', onShiftsChanged);
-    };
-  }, [socket, load]);
+  // Après une action : recharge le marché et mes shifts (et mes dispos si
+  // l'action en a levé une).
+  const load = () =>
+    Promise.all(
+      [...REFRESHED_KEYS].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+    ).then(() => {});
 
   const refresh = async () => {
     setIsRefreshing(true);
-    await load().catch(() => {});
+    await refreshNow().catch(() => {});
     setIsRefreshing(false);
   };
 

@@ -15,6 +15,9 @@ import { ClockInSettingsProvider, useClockInSettings } from './src/services/Cloc
 import { NotificationsProvider } from './src/services/Notifications';
 import { registerForPush } from './src/services/PushNotifications';
 import { NOTIFICATION_TARGET_TAB } from './src/lib/notificationTargets';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
+import { queryClient, persistOptions } from './src/lib/queryClient';
+import { useRealtimeInvalidation } from './src/lib/queries';
 
 // Écrans partagés (staff + manager)
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -60,12 +63,16 @@ export default function App() {
   }
 
   return (
-    <AuthProvider>
-      <NavigationContainer ref={navigationRef}>
-        <StatusBar style="auto" />
-        <RootNavigator />
-      </NavigationContainer>
-    </AuthProvider>
+    // Le cache sauvegardé sur le téléphone est relu au lancement : le
+    // planning s'affiche même sans réseau (voir lib/queryClient.ts).
+    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
+      <AuthProvider>
+        <NavigationContainer ref={navigationRef}>
+          <StatusBar style="auto" />
+          <RootNavigator />
+        </NavigationContainer>
+      </AuthProvider>
+    </PersistQueryClientProvider>
   );
 }
 
@@ -103,8 +110,12 @@ function usePushNotifications(isSignedIn: boolean) {
 }
 
 function RootNavigator() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, socket } = useAuth();
   usePushNotifications(Boolean(user) && !isLoading);
+  // Un seul abonnement aux signaux temps réel pour tous les écrans : chacun
+  // lit le cache, qui se recharge tout seul quand le backend signale un
+  // changement.
+  useRealtimeInvalidation(socket);
 
   if (isLoading) {
     return (

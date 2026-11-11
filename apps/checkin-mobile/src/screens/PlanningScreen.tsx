@@ -1,11 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { View, Text, Animated, FlatList, StyleSheet, RefreshControl, Pressable } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing } from '@horaires/ui-tokens';
 import type { Shift, Site } from '@horaires/shared-types';
-import { apiClient, useAuth } from '../services/AuthService';
+import { useAuth } from '../services/AuthService';
+import { queryKeys, useManualRefresh, useMyShifts, useRefreshOnFocus, useSites } from '../lib/queries';
 import { fonts } from '../theme';
+
+const NO_SHIFTS: Shift[] = [];
+const NO_SITES: Site[] = [];
+const REFRESHED_KEYS = [queryKeys.myShifts, queryKeys.sites];
 import { NotificationBell } from '../components/NotificationBell';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -63,9 +67,14 @@ function capitalize(s: string) {
 // cartes suivantes — seule la barre de mois (nav + libellé) reste toujours
 // visible, jamais emportée par le scroll.
 export function PlanningScreen() {
-  const { user, socket } = useAuth();
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [sites, setSites] = useState<Site[]>([]);
+  const { user } = useAuth();
+  // Depuis le cache : affiché tout de suite (hors ligne compris), rechargé
+  // en arrière-plan, et à chaque `shifts:changed` (un manager publie ou
+  // modifie un shift pendant que l'écran est ouvert).
+  const shifts = useMyShifts().data ?? NO_SHIFTS;
+  const sites = useSites().data ?? NO_SITES;
+  useRefreshOnFocus(REFRESHED_KEYS);
+  const refreshNow = useManualRefresh(REFRESHED_KEYS);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const today = useMemo(() => new Date(), []);
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(today));
@@ -75,32 +84,9 @@ export function PlanningScreen() {
   // dans les types de React Native 0.88).
   const listRef = useRef<FlatList<Shift> | null>(null);
 
-  const load = useCallback(async () => {
-    const [shiftList, siteList] = await Promise.all([apiClient.getShifts({ mine: true }), apiClient.getSites()]);
-    setShifts(shiftList.slice().sort((a, b) => a.startsAt.localeCompare(b.startsAt)));
-    setSites(siteList);
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load]),
-  );
-
-  // Un manager peut créer/publier un shift pendant que l'employé a l'écran
-  // ouvert — voir realtime.gateway.ts côté backend.
-  useEffect(() => {
-    if (!socket) return;
-    const onShiftsChanged = () => void load();
-    socket.on('shifts:changed', onShiftsChanged);
-    return () => {
-      socket.off('shifts:changed', onShiftsChanged);
-    };
-  }, [socket, load]);
-
   const refresh = async () => {
     setIsRefreshing(true);
-    await load().catch(() => {});
+    await refreshNow().catch(() => {});
     setIsRefreshing(false);
   };
 

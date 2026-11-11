@@ -1048,6 +1048,15 @@ reste "à faire".
   précédent). Pas de cache serveur (Redis) : inutile à cette échelle, risque
   de données périmées sur le pointage ; à reconsidérer avec plusieurs
   instances du backend.
+- **Même cache dans checkin-mobile** : hooks de
+  `apps/checkin-mobile/src/lib/queries.ts` pour Planning, Marché et Dispos
+  (`useRefreshOnFocus` au retour sur un onglet, `useManualRefresh` pour le
+  tire-pour-rafraîchir, signaux branchés une fois dans App.tsx). Consultation
+  hors ligne : `my-shifts`, `sites` et `my-availabilities` sont aussi
+  sauvegardés sur le téléphone (AsyncStorage, 7 jours, liste
+  `PERSISTED_KEYS` de `lib/queryClient.ts`) — jamais l'annuaire des
+  collègues, le PIN ni le pointage, qui restent en direct. Cache mémoire ET
+  téléphone vidés à la connexion et à la déconnexion (`clearQueryCache`).
 - **Notifications (cloche de checkin-mobile)** : table `notifications`,
   `NotificationsModule` (`GET /notifications`, `POST /notifications/:id/read`,
   `POST /notifications/read-all`, toujours sur l'appelant). Trois types,

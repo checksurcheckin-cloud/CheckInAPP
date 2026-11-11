@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { NotificationType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
@@ -6,6 +6,9 @@ import { isInMarketAudience } from '../shifts/market-audience';
 import { ExpoPushService } from './expo-push.service';
 
 const LIST_LIMIT = 50;
+// Délai avant d'envoyer le push d'un regroupement hebdomadaire : « Publier N
+// brouillons » publie les shifts en rafale, un seul push résume le lot.
+export const WEEKLY_PUSH_DELAY_MS = 4000;
 
 interface ShiftSummary {
   id: string;
@@ -24,14 +27,26 @@ interface ShiftSummary {
 // l'assignation ou la validation qui l'a déclenchée (même règle que
 // RealtimeGateway).
 @Injectable()
-export class NotificationsService {
+export class NotificationsService implements OnModuleDestroy {
   private readonly logger = new Logger(NotificationsService.name);
+
+  // Par employé et par semaine : file d'attente qui sérialise les mises à
+  // jour du regroupement (publications parallèles), et push en attente.
+  // En mémoire du process, comme le blocage des PIN : un redémarrage perd au
+  // pire un push, la notification de la cloche est déjà enregistrée.
+  private readonly weeklyQueues = new Map<string, Promise<void>>();
+  private readonly weeklyPushTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
     private readonly push: ExpoPushService,
   ) {}
+
+  onModuleDestroy() {
+    for (const timer of this.weeklyPushTimers.values()) clearTimeout(timer);
+    this.weeklyPushTimers.clear();
+  }
 
   async list(companyId: string, userId: string) {
     const where = { userId, user: { companyId } };
@@ -62,12 +77,42 @@ export class NotificationsService {
   }
 
   // Un shift publié vient d'être attribué à cet employé (par le manager, ou
-  // publication d'un brouillon déjà assigné).
+  // publication d'un brouillon déjà assigné). Regroupé par semaine du shift :
+  // « Vous avez 3 nouveaux shifts pour la S47 ». Tant qu'elle n'est pas lue,
+  // la notification de la semaine est mise à jour (compteur, remontée en
+  // tête) au lieu d'en créer une nouvelle ; une fois lue, le shift suivant en
+  // ouvre une nouvelle, qui ne compte que les shifts pas encore vus.
   async notifyShiftAssigned(companyId: string, shiftId: string, userId: string) {
     await this.safely('shift_assigned', async () => {
       const shift = await this.findShift(companyId, shiftId);
       if (!shift) return;
-      await this.send([userId], 'shift_assigned', shift, 'Nouveau shift au planning', describe(shift));
+      const week = shiftWeek(shift);
+      const key = `${userId}:${week.key}`;
+      await this.serialized(key, async () => {
+        const existing = await this.prisma.notification.findFirst({
+          where: { userId, type: 'shift_assigned', groupKey: week.key, readAt: null },
+        });
+        if (existing) {
+          const count = existing.groupCount + 1;
+          await this.prisma.notification.update({
+            where: { id: existing.id },
+            data: { groupCount: count, title: weeklyTitle(count, week.number), body: week.range, createdAt: new Date() },
+          });
+        } else {
+          await this.prisma.notification.create({
+            data: {
+              userId,
+              type: 'shift_assigned',
+              title: weeklyTitle(1, week.number),
+              body: describe(shift),
+              shiftId: shift.id,
+              groupKey: week.key,
+            },
+          });
+        }
+      });
+      this.realtime.emitToUser(userId, 'notifications:changed');
+      this.scheduleWeeklyPush(key, userId, week.key);
     });
   }
 
@@ -156,6 +201,41 @@ export class NotificationsService {
     await this.push.sendToUsers(unique, { title, body, data: { type, shiftId: shift.id } });
   }
 
+  private async serialized(key: string, run: () => Promise<void>) {
+    const previous = this.weeklyQueues.get(key) ?? Promise.resolve();
+    const current = previous.catch(() => {}).then(run);
+    this.weeklyQueues.set(key, current);
+    try {
+      await current;
+    } finally {
+      if (this.weeklyQueues.get(key) === current) this.weeklyQueues.delete(key);
+    }
+  }
+
+  // Un seul push par lot : chaque shift de la même semaine repousse l'envoi,
+  // qui reprend le texte final du regroupement.
+  private scheduleWeeklyPush(key: string, userId: string, groupKey: string) {
+    const pending = this.weeklyPushTimers.get(key);
+    if (pending) clearTimeout(pending);
+    const timer = setTimeout(() => {
+      this.weeklyPushTimers.delete(key);
+      void this.safely('shift_assigned push', async () => {
+        const notification = await this.prisma.notification.findFirst({
+          where: { userId, type: 'shift_assigned', groupKey },
+          orderBy: { createdAt: 'desc' },
+        });
+        // Déjà lue dans l'app entre-temps : inutile de sonner le téléphone.
+        if (!notification || notification.readAt) return;
+        await this.push.sendToUsers([userId], {
+          title: notification.title,
+          body: notification.body,
+          data: { type: 'shift_assigned', shiftId: notification.shiftId },
+        });
+      });
+    }, WEEKLY_PUSH_DELAY_MS);
+    this.weeklyPushTimers.set(key, timer);
+  }
+
   private async safely(label: string, run: () => Promise<void>) {
     try {
       await run();
@@ -173,4 +253,38 @@ export function describe(shift: Pick<ShiftSummary, 'startsAt' | 'endsAt' | 'site
   );
   const time = new Intl.DateTimeFormat('fr-BE', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   return `${day} · ${time.format(shift.startsAt)}–${time.format(shift.endsAt)} · ${shift.site.name}`;
+}
+
+const SHORT_DATE = { day: 'numeric', month: 'short' } as const;
+
+// Semaine ISO (lundi → dimanche) du début du shift, à l'heure du site.
+export function shiftWeek(shift: Pick<ShiftSummary, 'startsAt' | 'site'>) {
+  const timeZone = shift.site.timezone ?? 'Europe/Brussels';
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(shift.startsAt)
+    .reduce<Record<string, string>>((acc, p) => ({ ...acc, [p.type]: p.value }), {});
+  // Date locale du site représentée à midi UTC : plus aucun fuseau en jeu.
+  const local = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), 12));
+  const weekday = (local.getUTCDay() + 6) % 7; // lundi = 0
+  const monday = new Date(local.getTime() - weekday * 86_400_000);
+  const sunday = new Date(monday.getTime() + 6 * 86_400_000);
+  // Le jeudi de la semaine donne l'année ISO et le numéro de semaine.
+  const thursday = new Date(monday.getTime() + 3 * 86_400_000);
+  const isoYear = thursday.getUTCFullYear();
+  const number = Math.floor((thursday.getTime() - Date.UTC(isoYear, 0, 1, 12)) / (7 * 86_400_000)) + 1;
+
+  const fmt = (d: Date, opts: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat('fr-BE', { timeZone: 'UTC', ...opts }).format(d);
+  const sameMonth = monday.getUTCMonth() === sunday.getUTCMonth();
+  const range = sameMonth
+    ? `Semaine du ${fmt(monday, { day: 'numeric' })} au ${fmt(sunday, SHORT_DATE)}`
+    : `Semaine du ${fmt(monday, SHORT_DATE)} au ${fmt(sunday, SHORT_DATE)}`;
+
+  return { key: `${isoYear}-W${String(number).padStart(2, '0')}`, number, range };
+}
+
+export function weeklyTitle(count: number, weekNumber: number): string {
+  return count === 1
+    ? `Vous avez 1 nouveau shift pour la S${weekNumber}`
+    : `Vous avez ${count} nouveaux shifts pour la S${weekNumber}`;
 }

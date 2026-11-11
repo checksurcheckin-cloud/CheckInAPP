@@ -1072,6 +1072,18 @@ reste "à faire".
   texte rédigés côté backend en français, à l'heure du site. Temps réel :
   room `user:<id>` (RealtimeGateway.emitToUser), événement
   `notifications:changed` reçu seulement par le destinataire.
+  **`shift_assigned` est regroupé par semaine ISO du shift** (heure du site,
+  `shiftWeek`) : tant qu'elle n'est pas lue, une seule notification par
+  employé et par semaine (`groupKey` = `"2026-W47"`, `groupCount`), titrée
+  « Vous avez N nouveaux shifts pour la S47 » ; chaque shift suivant de la
+  même semaine incrémente le compteur et la remonte en tête (texte = plage
+  de la semaine dès 2 shifts). Une fois lue, le shift suivant en ouvre une
+  nouvelle (elle ne compte que les shifts pas encore vus). Les mises à jour
+  d'un même groupe sont sérialisées en mémoire (« Publier N brouillons »
+  publie en parallèle) et **un seul push par lot**, envoyé
+  `WEEKLY_PUSH_DELAY_MS` (4 s) après le dernier shift, avec le texte final —
+  pas de push si la notification a été lue entre-temps. Les autres types
+  restent une notification par événement.
 - **Notifications push** : chaque notification de la cloche part aussi en
   push via l'API Expo (`ExpoPushService`, table `push_tokens`, un token par
   téléphone, rattaché au dernier compte connecté dessus). checkin-mobile

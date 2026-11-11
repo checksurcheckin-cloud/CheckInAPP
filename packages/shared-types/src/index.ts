@@ -272,6 +272,10 @@ export interface AppNotification {
   title: string;
   body: string;
   shiftId: string | null;
+  // « Nouveaux shifts » regroupés par semaine ISO ("2026-W47") : nombre de
+  // shifts que résume la notification (1 pour les autres types).
+  groupKey: string | null;
+  groupCount: number;
   readAt: string | null;
   createdAt: string;
 }

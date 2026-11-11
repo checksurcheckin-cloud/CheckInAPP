@@ -1,7 +1,12 @@
 import { Test } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { NotificationsService, describe as describeShift } from './notifications.service';
+import {
+  NotificationsService,
+  WEEKLY_PUSH_DELAY_MS,
+  describe as describeShift,
+  shiftWeek,
+} from './notifications.service';
 import { ExpoPushService } from './expo-push.service';
 
 describe('NotificationsService', () => {
@@ -12,7 +17,15 @@ describe('NotificationsService', () => {
     shift: { findFirst: jest.Mock };
     user: { findMany: jest.Mock };
     shiftAssignment: { findMany: jest.Mock };
-    notification: { createMany: jest.Mock; findMany: jest.Mock; count: jest.Mock; updateMany: jest.Mock };
+    notification: {
+      createMany: jest.Mock;
+      create: jest.Mock;
+      update: jest.Mock;
+      findFirst: jest.Mock;
+      findMany: jest.Mock;
+      count: jest.Mock;
+      updateMany: jest.Mock;
+    };
   };
 
   // Lundi 16 novembre 2026, 09:00–17:00 à Bruxelles (UTC+1 en hiver).
@@ -34,6 +47,9 @@ describe('NotificationsService', () => {
       shiftAssignment: { findMany: jest.fn().mockResolvedValue([]) },
       notification: {
         createMany: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([]),
         count: jest.fn().mockResolvedValue(0),
         updateMany: jest.fn(),
@@ -61,30 +77,92 @@ describe('NotificationsService', () => {
     expect(describeShift(shift)).toBe('lun. 16 nov. · 09:00–17:00 · Site Bruxelles Centre');
   });
 
-  it('notifies the assignee and pings only their own realtime room', async () => {
+  afterEach(() => {
+    service.onModuleDestroy();
+    jest.useRealTimers();
+  });
+
+  it('numbers the week in the site timezone, ISO style', () => {
+    expect(shiftWeek(shift)).toEqual({ key: '2026-W47', number: 47, range: 'Semaine du 16 au 22 nov.' });
+    // Dimanche 22 novembre 23:30 à Bruxelles = déjà lundi 23 en UTC : reste en S47.
+    expect(shiftWeek({ ...shift, startsAt: new Date('2026-11-22T22:30:00.000Z') }).number).toBe(47);
+    // 31 décembre 2026 (jeudi) : semaine 53 de 2026.
+    expect(shiftWeek({ ...shift, startsAt: new Date('2026-12-31T10:00:00.000Z') }).key).toBe('2026-W53');
+    expect(shiftWeek({ ...shift, startsAt: new Date('2026-11-30T10:00:00.000Z') }).range).toBe(
+      'Semaine du 30 nov. au 6 déc.',
+    );
+  });
+
+  it("opens the week's notification for the assignee and pings only their own realtime room", async () => {
+    jest.useFakeTimers();
     await service.notifyShiftAssigned('company-a', 'shift-1', 'user-1');
 
     expect(prisma.shift.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 'shift-1', site: { companyId: 'company-a' } } }),
     );
-    expect(prisma.notification.createMany).toHaveBeenCalledWith({
-      data: [
-        {
-          userId: 'user-1',
-          type: 'shift_assigned',
-          title: 'Nouveau shift au planning',
-          body: 'lun. 16 nov. · 09:00–17:00 · Site Bruxelles Centre',
-          shiftId: 'shift-1',
-        },
-      ],
+    expect(prisma.notification.findFirst).toHaveBeenCalledWith({
+      where: { userId: 'user-1', type: 'shift_assigned', groupKey: '2026-W47', readAt: null },
+    });
+    expect(prisma.notification.create).toHaveBeenCalledWith({
+      data: {
+        userId: 'user-1',
+        type: 'shift_assigned',
+        title: 'Vous avez 1 nouveau shift pour la S47',
+        body: 'lun. 16 nov. · 09:00–17:00 · Site Bruxelles Centre',
+        shiftId: 'shift-1',
+        groupKey: '2026-W47',
+      },
     });
     expect(realtime.emitToUser).toHaveBeenCalledTimes(1);
     expect(realtime.emitToUser).toHaveBeenCalledWith('user-1', 'notifications:changed');
+  });
+
+  it('adds later shifts of the same week to the unread notification, with a single push for the batch', async () => {
+    jest.useFakeTimers();
+    let stored: Record<string, unknown> | null = null;
+    prisma.notification.create.mockImplementation(({ data }) => {
+      stored = { id: 'notif-1', groupCount: 1, readAt: null, ...data };
+    });
+    prisma.notification.update.mockImplementation(({ data }) => {
+      stored = { ...stored, ...data };
+    });
+    prisma.notification.findFirst.mockImplementation(() => Promise.resolve(stored));
+
+    await Promise.all([
+      service.notifyShiftAssigned('company-a', 'shift-1', 'user-1'),
+      service.notifyShiftAssigned('company-a', 'shift-1', 'user-1'),
+      service.notifyShiftAssigned('company-a', 'shift-1', 'user-1'),
+    ]);
+
+    expect(prisma.notification.create).toHaveBeenCalledTimes(1);
+    expect(prisma.notification.update).toHaveBeenLastCalledWith({
+      where: { id: 'notif-1' },
+      data: expect.objectContaining({
+        groupCount: 3,
+        title: 'Vous avez 3 nouveaux shifts pour la S47',
+        body: 'Semaine du 16 au 22 nov.',
+      }),
+    });
+    expect(push.sendToUsers).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(WEEKLY_PUSH_DELAY_MS);
+
+    expect(push.sendToUsers).toHaveBeenCalledTimes(1);
     expect(push.sendToUsers).toHaveBeenCalledWith(['user-1'], {
-      title: 'Nouveau shift au planning',
-      body: 'lun. 16 nov. · 09:00–17:00 · Site Bruxelles Centre',
+      title: 'Vous avez 3 nouveaux shifts pour la S47',
+      body: 'Semaine du 16 au 22 nov.',
       data: { type: 'shift_assigned', shiftId: 'shift-1' },
     });
+  });
+
+  it('skips the push when the notification was read in the app meanwhile', async () => {
+    jest.useFakeTimers();
+    await service.notifyShiftAssigned('company-a', 'shift-1', 'user-1');
+    prisma.notification.findFirst.mockResolvedValue({ id: 'notif-1', readAt: new Date() });
+
+    await jest.advanceTimersByTimeAsync(WEEKLY_PUSH_DELAY_MS);
+
+    expect(push.sendToUsers).not.toHaveBeenCalled();
   });
 
   it('sends nothing for a shift of another company', async () => {
@@ -139,7 +217,7 @@ describe('NotificationsService', () => {
   });
 
   it('never throws: a failing notification must not break the action that triggered it', async () => {
-    prisma.notification.createMany.mockRejectedValue(new Error('db down'));
+    prisma.notification.create.mockRejectedValue(new Error('db down'));
 
     await expect(service.notifyShiftAssigned('company-a', 'shift-1', 'user-1')).resolves.toBeUndefined();
   });

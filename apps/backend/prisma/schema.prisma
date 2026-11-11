@@ -344,6 +344,11 @@ model Notification {
   title     String
   body      String
   shiftId   String?          @map("shift_id")
+  // Regroupement des « nouveau shift » par semaine (ex. "2026-W47") : tant
+  // qu'elle n'est pas lue, une seule notification par employé et par
+  // semaine, dont groupCount compte les shifts.
+  groupKey   String?         @map("group_key")
+  groupCount Int             @default(1) @map("group_count")
   readAt    DateTime?        @map("read_at")
   createdAt DateTime         @default(now()) @map("created_at")
 

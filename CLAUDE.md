@@ -1062,9 +1062,18 @@ reste "à faire".
   d'exception (une notification ratée ne fait pas échouer l'action). Titre et
   texte rédigés côté backend en français, à l'heure du site. Temps réel :
   room `user:<id>` (RealtimeGateway.emitToUser), événement
-  `notifications:changed` reçu seulement par le destinataire. Étape suivante
-  prévue : notifications push (expo-notifications + EAS Build — Expo Go ne
-  reçoit plus de push sur Android).
+  `notifications:changed` reçu seulement par le destinataire.
+- **Notifications push** : chaque notification de la cloche part aussi en
+  push via l'API Expo (`ExpoPushService`, table `push_tokens`, un token par
+  téléphone, rattaché au dernier compte connecté dessus). checkin-mobile
+  enregistre son token à chaque session (`services/PushNotifications.ts`,
+  `POST /notifications/push-tokens`) et le retire à la déconnexion AVANT
+  d'effacer la session. Ne marche que dans l'app compilée avec EAS Build
+  (projet `@checksurcheckins-team/checkin-mobile`, `eas.json`) : Expo Go et
+  les simulateurs sont ignorés sans erreur. Android exige la clé FCM V1
+  (Firebase) déposée dans les credentials EAS ; iOS un compte Apple
+  Developer. `EXPO_ACCESS_TOKEN` (facultatif, côté backend) si « Enhanced
+  Push Security » est activé sur le projet Expo.
 
 **Connu manquant / dette identifiée** :
 1. Pas de révocation de session côté backend (voir logout ci-dessus) — à

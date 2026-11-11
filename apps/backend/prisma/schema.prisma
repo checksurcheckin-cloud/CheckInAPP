@@ -173,6 +173,7 @@ model User {
   availabilities      Availability[]
   auditLogs           AuditLog[]
   notifications       Notification[]
+  pushTokens          PushToken[]
 
   @@map("users")
 }
@@ -348,4 +349,21 @@ model Notification {
 
   @@index([userId, createdAt])
   @@map("notifications")
+}
+
+// Adresse push Expo d'un téléphone connecté (checkin-mobile, compilé avec
+// EAS : Expo Go n'en reçoit pas). Un token = un téléphone, rattaché au
+// dernier compte qui s'y est connecté ; supprimé à la déconnexion, ou quand
+// Expo signale que l'app a été désinstallée (DeviceNotRegistered).
+model PushToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  platform  String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("push_tokens")
 }

@@ -2,10 +2,12 @@ import { Test } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { NotificationsService, describe as describeShift } from './notifications.service';
+import { ExpoPushService } from './expo-push.service';
 
 describe('NotificationsService', () => {
   let service: NotificationsService;
   let realtime: { emitToUser: jest.Mock };
+  let push: { sendToUsers: jest.Mock };
   let prisma: {
     shift: { findFirst: jest.Mock };
     user: { findMany: jest.Mock };
@@ -38,12 +40,14 @@ describe('NotificationsService', () => {
       },
     };
     realtime = { emitToUser: jest.fn() };
+    push = { sendToUsers: jest.fn() };
 
     const module = await Test.createTestingModule({
       providers: [
         NotificationsService,
         { provide: PrismaService, useValue: prisma },
         { provide: RealtimeGateway, useValue: realtime },
+        { provide: ExpoPushService, useValue: push },
       ],
     }).compile();
 
@@ -76,6 +80,11 @@ describe('NotificationsService', () => {
     });
     expect(realtime.emitToUser).toHaveBeenCalledTimes(1);
     expect(realtime.emitToUser).toHaveBeenCalledWith('user-1', 'notifications:changed');
+    expect(push.sendToUsers).toHaveBeenCalledWith(['user-1'], {
+      title: 'Nouveau shift au planning',
+      body: 'lun. 16 nov. · 09:00–17:00 · Site Bruxelles Centre',
+      data: { type: 'shift_assigned', shiftId: 'shift-1' },
+    });
   });
 
   it('sends nothing for a shift of another company', async () => {

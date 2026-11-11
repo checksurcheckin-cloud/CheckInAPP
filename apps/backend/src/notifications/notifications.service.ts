@@ -3,6 +3,7 @@ import { NotificationType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { isInMarketAudience } from '../shifts/market-audience';
+import { ExpoPushService } from './expo-push.service';
 
 const LIST_LIMIT = 50;
 
@@ -29,6 +30,7 @@ export class NotificationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
+    private readonly push: ExpoPushService,
   ) {}
 
   async list(companyId: string, userId: string) {
@@ -149,6 +151,9 @@ export class NotificationsService {
     for (const userId of unique) {
       this.realtime.emitToUser(userId, 'notifications:changed');
     }
+    // Sur l'écran du téléphone, app fermée comprise. `type` dit à l'app où
+    // ouvrir quand on touche la notification.
+    await this.push.sendToUsers(unique, { title, body, data: { type, shiftId: shift.id } });
   }
 
   private async safely(label: string, run: () => Promise<void>) {

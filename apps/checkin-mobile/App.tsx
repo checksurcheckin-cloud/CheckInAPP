@@ -1,16 +1,20 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import * as ExpoNotifications from 'expo-notifications';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { Sora_600SemiBold, Sora_700Bold } from '@expo-google-fonts/sora';
 import { colors } from '@horaires/ui-tokens';
-import { AuthProvider, useAuth } from './src/services/AuthService';
+import type { NotificationType } from '@horaires/shared-types';
+import { AuthProvider, apiClient, useAuth } from './src/services/AuthService';
 import { FloatingTabBar } from './src/components/FloatingTabBar';
 import { ClockInSettingsProvider, useClockInSettings } from './src/services/ClockInSettings';
 import { NotificationsProvider } from './src/services/Notifications';
+import { registerForPush } from './src/services/PushNotifications';
+import { NOTIFICATION_TARGET_TAB } from './src/lib/notificationTargets';
 
 // Écrans partagés (staff + manager)
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -25,6 +29,9 @@ import { NotificationsScreen } from './src/screens/NotificationsScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+// Pour ouvrir le bon onglet quand on touche une notification push, depuis
+// l'extérieur des écrans.
+const navigationRef = createNavigationContainerRef<any>();
 
 /**
  * Point d'entrée. UNE SEULE app, IDENTIQUE pour tous les rôles : un manager
@@ -54,7 +61,7 @@ export default function App() {
 
   return (
     <AuthProvider>
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         <StatusBar style="auto" />
         <RootNavigator />
       </NavigationContainer>
@@ -62,8 +69,42 @@ export default function App() {
   );
 }
 
+// Notifications push : enregistre le téléphone à chaque session, et ouvre
+// l'onglet concerné quand on touche une notification — y compris celle qui a
+// lancé l'app, une fois la session restaurée et l'écran principal affiché.
+function usePushNotifications(isSignedIn: boolean) {
+  const lastResponse = ExpoNotifications.useLastNotificationResponse();
+  const handledId = useRef<string | null>(null);
+  // Au lancement de l'app par une notification, la navigation n'est pas
+  // toujours prête au premier passage : on réessaie un peu plus tard.
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    if (isSignedIn) void registerForPush(apiClient);
+  }, [isSignedIn]);
+
+  useEffect(() => {
+    if (!isSignedIn || !lastResponse) return;
+    const id = lastResponse.notification.request.identifier;
+    if (handledId.current === id) return;
+    const type = lastResponse.notification.request.content.data?.type as NotificationType | undefined;
+    const tab = type ? NOTIFICATION_TARGET_TAB[type] : undefined;
+    if (!tab) return;
+    if (!navigationRef.isReady()) {
+      if (retry < 10) {
+        const timer = setTimeout(() => setRetry((n) => n + 1), 200);
+        return () => clearTimeout(timer);
+      }
+      return;
+    }
+    handledId.current = id;
+    navigationRef.navigate('Main', { screen: tab });
+  }, [isSignedIn, lastResponse, retry]);
+}
+
 function RootNavigator() {
   const { user, isLoading } = useAuth();
+  usePushNotifications(Boolean(user) && !isLoading);
 
   if (isLoading) {
     return (

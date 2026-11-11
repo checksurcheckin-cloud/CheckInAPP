@@ -8,6 +8,7 @@ import React, {
 import * as SecureStore from 'expo-secure-store';
 import { ApiClient, connectRealtime, type Socket } from '@horaires/api-client';
 import type { User } from '@horaires/shared-types';
+import { unregisterPush } from './PushNotifications';
 
 const ACCESS_TOKEN_KEY = 'horaires_access_token';
 const REFRESH_TOKEN_KEY = 'horaires_refresh_token';
@@ -79,6 +80,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   const logout = useCallback(async () => {
+    // Tant que la session est encore valide : sinon le téléphone continuerait
+    // à recevoir les push de ce compte après la déconnexion.
+    await unregisterPush(apiClient);
     await clearSession();
     setUser(null);
   }, []);

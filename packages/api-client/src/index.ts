@@ -464,4 +464,13 @@ export class ApiClient {
   markAllNotificationsRead() {
     return this.request<void>('POST', '/notifications/read-all');
   }
+
+  // Token Expo du téléphone, pour les notifications push (checkin-mobile).
+  registerPushToken(token: string, platform: 'ios' | 'android') {
+    return this.request<void>('POST', '/notifications/push-tokens', { token, platform });
+  }
+
+  unregisterPushToken(token: string) {
+    return this.request<void>('POST', '/notifications/push-tokens/unregister', { token });
+  }
 }

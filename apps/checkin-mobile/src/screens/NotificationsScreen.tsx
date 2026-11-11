@@ -7,6 +7,7 @@ import { colors } from '@horaires/ui-tokens';
 import { fonts } from '../theme';
 import { useNotifications } from '../services/Notifications';
 import { withPressedFeedback } from '../lib/pressedStyle';
+import { NOTIFICATION_TARGET_TAB } from '../lib/notificationTargets';
 
 const TYPE_ICONS: Record<NotificationType, keyof typeof Ionicons.glyphMap> = {
   shift_assigned: 'calendar',
@@ -14,13 +15,6 @@ const TYPE_ICONS: Record<NotificationType, keyof typeof Ionicons.glyphMap> = {
   shift_available: 'flash',
 };
 
-// Où mène une notification : son planning pour un shift qui lui est
-// attribué, le marché pour un shift à prendre.
-const TARGET_TAB: Record<NotificationType, string> = {
-  shift_assigned: 'Planning',
-  application_accepted: 'Planning',
-  shift_available: 'ShiftMarketplace',
-};
 
 function timeAgo(iso: string): string {
   const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -47,7 +41,7 @@ export function NotificationsScreen() {
 
   const open = (notification: AppNotification) => {
     markRead(notification.id);
-    navigation.navigate('Main', { screen: TARGET_TAB[notification.type] });
+    navigation.navigate('Main', { screen: NOTIFICATION_TARGET_TAB[notification.type] });
   };
 
   const renderItem = ({ item }: { item: AppNotification }) => {

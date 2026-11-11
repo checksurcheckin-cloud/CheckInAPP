@@ -48,6 +48,26 @@ function startOfWeek(date: Date) {
   return d;
 }
 
+// Numéro de semaine ISO (lundi → dimanche), comme le « S47 » des
+// notifications de nouveaux shifts.
+function isoWeekNumber(date: Date) {
+  const thursday = addDays(startOfWeek(date), 3);
+  const firstThursday = addDays(startOfWeek(new Date(thursday.getFullYear(), 0, 4)), 3);
+  return Math.round((thursday.getTime() - firstThursday.getTime()) / (7 * 86_400_000)) + 1;
+}
+
+function weekRangeLabel(monday: Date) {
+  const sunday = addDays(monday, 6);
+  const short = (d: Date) => d.toLocaleDateString('fr-BE', { day: 'numeric', month: 'short' });
+  return monday.getMonth() === sunday.getMonth() ? `${monday.getDate()} – ${short(sunday)}` : `${short(monday)} – ${short(sunday)}`;
+}
+
+// Liste du mois découpée par semaine : un en-tête avant les shifts de chaque
+// semaine (seulement celles qui en ont).
+type ListRow =
+  | { kind: 'week'; key: string; number: number; range: string; count: number; isCurrent: boolean }
+  | { kind: 'shift'; key: string; shift: Shift };
+
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
@@ -82,7 +102,7 @@ export function PlanningScreen() {
   const scrollY = useRef(new Animated.Value(0)).current;
   // Instance FlatList sous-jacente (Animated.FlatList n'est plus générique
   // dans les types de React Native 0.88).
-  const listRef = useRef<FlatList<Shift> | null>(null);
+  const listRef = useRef<FlatList<ListRow> | null>(null);
 
   const refresh = async () => {
     setIsRefreshing(true);
@@ -110,12 +130,40 @@ export function PlanningScreen() {
   // la fois : on veut voir tout le mois défiler sous le calendrier.
   const monthShifts = useMemo(
     () =>
-      shifts.filter((s) => {
-        const d = new Date(s.startsAt);
-        return d.getFullYear() === monthAnchor.getFullYear() && d.getMonth() === monthAnchor.getMonth();
-      }),
+      shifts
+        .filter((s) => {
+          const d = new Date(s.startsAt);
+          return d.getFullYear() === monthAnchor.getFullYear() && d.getMonth() === monthAnchor.getMonth();
+        })
+        .sort((a, b) => (a.startsAt < b.startsAt ? -1 : a.startsAt > b.startsAt ? 1 : 0)),
     [shifts, monthAnchor],
   );
+
+  const rows = useMemo(() => {
+    const result: ListRow[] = [];
+    const currentWeek = startOfWeek(today).getTime();
+    const headers = new Map<string, Extract<ListRow, { kind: 'week' }>>();
+    for (const s of monthShifts) {
+      const monday = startOfWeek(new Date(s.startsAt));
+      const key = `week-${monday.getTime()}`;
+      let header = headers.get(key);
+      if (!header) {
+        header = {
+          kind: 'week',
+          key,
+          number: isoWeekNumber(monday),
+          range: weekRangeLabel(monday),
+          count: 0,
+          isCurrent: monday.getTime() === currentWeek,
+        };
+        headers.set(key, header);
+        result.push(header);
+      }
+      header.count += 1;
+      result.push({ kind: 'shift', key: s.id, shift: s });
+    }
+    return result;
+  }, [monthShifts, today]);
 
   // Le prochain shift = le premier pas encore terminé (un shift en cours
   // compte encore), tous mois confondus — seule carte encadrée de la liste.
@@ -155,7 +203,28 @@ export function PlanningScreen() {
           }),
         };
 
-  const renderCard = ({ item }: { item: Shift }) => {
+  const renderRow = ({ item }: { item: ListRow }) => {
+    if (item.kind === 'shift') return renderCard(item.shift);
+    return (
+      <View style={styles.weekHeader}>
+        <View style={[styles.weekBadge, item.isCurrent ? styles.weekBadgeCurrent : null]}>
+          <Text style={[styles.weekBadgeText, item.isCurrent ? styles.weekBadgeTextCurrent : null]}>
+            S{item.number}
+          </Text>
+        </View>
+        <Text style={styles.weekRange}>
+          {item.isCurrent ? 'Cette semaine · ' : ''}
+          {item.range}
+        </Text>
+        <View style={styles.weekLine} />
+        <Text style={styles.weekCount}>
+          {item.count} shift{item.count > 1 ? 's' : ''}
+        </Text>
+      </View>
+    );
+  };
+
+  const renderCard = (item: Shift) => {
     const mine = item.assignments?.find((a) => a.userId === user?.id);
     const pending = mine ? PENDING_STATUSES.has(mine.status) : false;
     const startDate = new Date(item.startsAt);
@@ -262,8 +331,8 @@ export function PlanningScreen() {
 
       <Animated.FlatList
         ref={listRef}
-        data={monthShifts}
-        keyExtractor={(item: Shift) => item.id}
+        data={rows}
+        keyExtractor={(item: ListRow) => item.key}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         // Pas de rebond élastique en bas de liste (voulu à l'usage) — le
@@ -276,7 +345,7 @@ export function PlanningScreen() {
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
         scrollEventThrottle={16}
         ListEmptyComponent={<Text style={styles.empty}>Aucun shift ce mois-ci.</Text>}
-        renderItem={renderCard}
+        renderItem={renderRow}
       />
     </View>
   );
@@ -343,7 +412,23 @@ const styles = StyleSheet.create({
   dayDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: 'transparent' },
   dayDotFilled: { backgroundColor: colors.primary },
 
-  listContent: { paddingTop: 16, paddingBottom: 110, gap: 12 },
+  listContent: { paddingTop: 4, paddingBottom: 110, gap: 12 },
+  // En-tête de semaine : « S47 · 16 – 22 nov. ——— 3 shifts ».
+  weekHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
+  weekBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  weekBadgeCurrent: { backgroundColor: colors.primary, borderColor: colors.primary },
+  weekBadgeText: { fontFamily: fonts.displaySemiBold, fontSize: 12, color: colors.textPrimary },
+  weekBadgeTextCurrent: { color: colors.surface },
+  weekRange: { fontSize: 12.5, fontWeight: '600', color: colors.textSecondary },
+  weekLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
+  weekCount: { fontSize: 11.5, color: colors.textSecondary },
   empty: { color: colors.textSecondary, marginTop: spacing.sm },
   card: {
     backgroundColor: colors.surface,

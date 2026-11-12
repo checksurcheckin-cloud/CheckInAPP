@@ -38,6 +38,8 @@ export interface Company {
   // Pointage depuis l'app mobile (QR rotatif + GPS) — désactivé, l'onglet
   // Pointage disparaît de checkin-mobile.
   mobileClockInEnabled: boolean;
+  // Commission paritaire ("302", "201"…) : règles de conformité du planning.
+  jointCommittee?: string | null;
   createdAt: string;
 }
 
@@ -63,6 +65,8 @@ export interface Site {
   geoLat?: number;
   geoLng?: number;
   timezone: string;
+  // Commission paritaire propre au site — null = celle de l'entreprise.
+  jointCommittee?: string | null;
 }
 
 export interface User {
@@ -84,7 +88,43 @@ export interface User {
   // visible sur tous les sites de la grille planning (voir CLAUDE.md
   // décision #25).
   siteId?: string | null;
+  // Contrat — contrôles de conformité du planning (null = non renseigné).
+  contractType?: ContractType | null;
+  weeklyContractHours?: number | null;
+  birthDate?: string | null; // "YYYY-MM-DD…"
   // pas de pinCodeHash exposé côté client par défaut
+}
+
+export type ContractType = 'full_time' | 'part_time' | 'student' | 'flexi_job';
+
+// ---- Conformité du planning au droit du travail belge (GET /compliance) ----
+// Avertissements, jamais bloquants. `error` = interdit sans dérogation
+// spécifique, `warning` = à vérifier, `info` = rappel.
+export type ComplianceSeverity = 'error' | 'warning' | 'info';
+
+export interface ComplianceViolation {
+  ruleId: string;
+  severity: ComplianceSeverity;
+  userId: string;
+  shiftIds: string[];
+  date: string; // jour local (YYYY-MM-DD), ou lundi de la semaine
+  message: string;
+  legalRef: string;
+  // La valeur sectorielle utilisée reste à faire valider.
+  toValidate?: boolean;
+}
+
+export interface ComplianceReport {
+  violations: ComplianceViolation[];
+  // Employés planifiés sans contrat renseigné (contrôlés comme temps plein majeur).
+  missingContract: string[];
+}
+
+export interface JointCommittee {
+  code: string;
+  label: string;
+  toValidate: string[];
+  sources: string[];
 }
 
 export interface TimeEntry {

@@ -18,6 +18,9 @@ export const queryKeys = {
   presenceForSite: (siteId: string) => ['presence', siteId] as const,
   pendingOffers: ['pending-offers'] as const,
   company: ['company'] as const,
+  compliance: ['compliance'] as const,
+  complianceRange: (siteId: string, from: string, to: string) => ['compliance', siteId, from, to] as const,
+  jointCommittees: ['joint-committees'] as const,
 };
 
 // Magasins de l'entreprise + périmètre du manager connecté (décision #36).
@@ -69,6 +72,25 @@ export function usePendingOffers() {
   return useQuery({ queryKey: queryKeys.pendingOffers, queryFn: () => apiClient.getPendingShiftOffers() });
 }
 
+// Contrôle de conformité du planning affiché (droit du travail belge) —
+// avertissements uniquement. Rechargé avec les shifts.
+export function useCompliance(siteId: string | null, from: string, to: string) {
+  return useQuery({
+    queryKey: queryKeys.complianceRange(siteId ?? '', from, to),
+    queryFn: () => apiClient.getCompliance({ siteId: siteId!, from, to }),
+    enabled: Boolean(siteId),
+  });
+}
+
+// Liste fixe (côté backend, rule-packs.ts) : jamais périmée en cours de session.
+export function useJointCommittees() {
+  return useQuery({
+    queryKey: queryKeys.jointCommittees,
+    queryFn: () => apiClient.getJointCommittees(),
+    staleTime: Infinity,
+  });
+}
+
 export function useCompany() {
   return useQuery({ queryKey: queryKeys.company, queryFn: () => apiClient.getMyCompany() });
 }
@@ -78,12 +100,12 @@ export function useCompany() {
 // `shifts:changed` ; `users:changed` couvre aussi les magasins gérés, d'où
 // le périmètre.
 const INVALIDATIONS: Record<string, QueryKey[]> = {
-  'shifts:changed': [queryKeys.shifts, queryKeys.pendingOffers],
+  'shifts:changed': [queryKeys.shifts, queryKeys.pendingOffers, queryKeys.compliance],
   'availabilities:changed': [queryKeys.availabilities],
   'time-entries:changed': [queryKeys.presence],
-  'settings:changed': [queryKeys.company],
-  'sites:changed': [queryKeys.siteScope],
-  'users:changed': [queryKeys.users, queryKeys.siteScope],
+  'settings:changed': [queryKeys.company, queryKeys.compliance],
+  'sites:changed': [queryKeys.siteScope, queryKeys.compliance],
+  'users:changed': [queryKeys.users, queryKeys.siteScope, queryKeys.compliance],
 };
 
 export function useRealtimeInvalidation(socket: Socket | null) {

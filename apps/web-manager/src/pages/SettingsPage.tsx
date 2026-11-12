@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { MapPin, Smartphone } from 'lucide-react';
+import { MapPin, Scale, Smartphone } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import { apiClient, useAuth } from '../services/AuthService';
-import { queryKeys, useCompany } from '../lib/queries';
+import { queryKeys, useCompany, useJointCommittees } from '../lib/queries';
 
 export function SettingsPage() {
   const { user } = useAuth();
@@ -15,6 +15,23 @@ export function SettingsPage() {
   const isLoading = companyQuery.isPending;
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const jointCommittees = useJointCommittees().data ?? [];
+
+  const setJointCommittee = async (code: string) => {
+    if (!company || !isAdmin) return;
+    setError(null);
+    setIsSaving(true);
+    try {
+      const updated = await apiClient.updateCompanySettings({ jointCommittee: code || null });
+      queryClient.setQueryData(queryKeys.company, updated);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.compliance });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Échec de la mise à jour');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const toggle = async (key: 'gpsClockInEnabled' | 'mobileClockInEnabled') => {
     if (!company || !isAdmin) return;
@@ -37,6 +54,39 @@ export function SettingsPage() {
       {isLoading ? (
         <p style={styles.muted}>Chargement…</p>
       ) : company ? (
+        <>
+        <div style={{ ...styles.card, marginBottom: spacing.lg }}>
+          <div style={styles.rowHeader}>
+            <div style={styles.iconMark}>
+              <Scale size={18} color={colors.primary} strokeWidth={2.25} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h2 style={styles.sectionTitle}>Commission paritaire</h2>
+              <p style={styles.description}>
+                Détermine les règles du droit du travail belge vérifiées lors de la création des horaires (durées
+                maximales, repos, dimanche, nuit, temps partiel…). Un site peut avoir sa propre commission (page Sites),
+                par exemple un service de livraison.
+              </p>
+              <select
+                value={company.jointCommittee ?? ''}
+                disabled={!isAdmin || isSaving}
+                onChange={(e) => void setJointCommittee(e.target.value)}
+                style={styles.select}
+              >
+                <option value="">Non renseignée — socle légal uniquement</option>
+                {jointCommittees.map((jc) => (
+                  <option key={jc.code} value={jc.code}>
+                    {jc.label}
+                  </option>
+                ))}
+              </select>
+              <p style={styles.note}>
+                Les contrôles sont des avertissements, jamais bloquants : le planning ne connaît ni votre règlement de
+                travail ni vos dérogations. Les paramètres sectoriels sont à faire valider par votre secrétariat social.
+              </p>
+            </div>
+          </div>
+        </div>
         <div style={styles.card}>
           <SettingRow
             icon={<Smartphone size={18} color={colors.primary} strokeWidth={2.25} />}
@@ -61,6 +111,7 @@ export function SettingsPage() {
           {!isAdmin ? <p style={styles.muted}>Seul un administrateur peut modifier ces réglages.</p> : null}
           {error ? <p style={styles.error}>{error}</p> : null}
         </div>
+        </>
       ) : (
         <p style={styles.muted}>Impossible de charger les réglages de l'entreprise.</p>
       )}
@@ -151,6 +202,16 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: colors.surface,
     boxShadow: shadows.sm,
     transition: 'transform 0.15s ease',
+  },
+  select: {
+    marginTop: spacing.md,
+    width: '100%',
+    padding: `${spacing.sm}px ${spacing.md}px`,
+    borderRadius: radius.md,
+    border: `1px solid ${colors.border}`,
+    backgroundColor: colors.surface,
+    color: colors.textPrimary,
+    fontSize: typography.sizes.sm,
   },
   divider: { height: 1, backgroundColor: colors.border, margin: `${spacing.lg}px 0` },
   stateTag: { fontSize: typography.sizes.xs, fontWeight: 600 },

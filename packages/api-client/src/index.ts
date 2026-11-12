@@ -22,6 +22,10 @@ import type {
   Site,
   TimeEntry,
   User,
+  ComplianceReport,
+  ComplianceViolation,
+  ContractType,
+  JointCommittee,
 } from '@horaires/shared-types';
 
 export { connectRealtime } from './realtime';
@@ -179,7 +183,11 @@ export class ApiClient {
 
   // Réglages de pointage par défaut de l'entreprise (admin uniquement) — un
   // champ omis reste inchangé.
-  updateCompanySettings(payload: { gpsClockInEnabled?: boolean; mobileClockInEnabled?: boolean }) {
+  updateCompanySettings(payload: {
+    gpsClockInEnabled?: boolean;
+    mobileClockInEnabled?: boolean;
+    jointCommittee?: string | null;
+  }) {
     return this.request<Company>('PATCH', '/companies/me/settings', payload);
   }
 
@@ -188,13 +196,27 @@ export class ApiClient {
     return this.request<Site[]>('GET', '/sites');
   }
 
-  createSite(payload: { name: string; address?: string; geoLat?: number; geoLng?: number; timezone?: string }) {
+  createSite(payload: {
+    name: string;
+    address?: string;
+    geoLat?: number;
+    geoLng?: number;
+    timezone?: string;
+    jointCommittee?: string | null;
+  }) {
     return this.request<Site>('POST', '/sites', payload);
   }
 
   updateSite(
     siteId: string,
-    payload: Partial<{ name: string; address: string; geoLat: number; geoLng: number; timezone: string }>,
+    payload: Partial<{
+      name: string;
+      address: string;
+      geoLat: number;
+      geoLng: number;
+      timezone: string;
+      jointCommittee: string | null;
+    }>,
   ) {
     return this.request<Site>('PATCH', `/sites/${siteId}`, payload);
   }
@@ -303,6 +325,28 @@ export class ApiClient {
   // Admin : magasins gérés par un manager ([] = tous les magasins).
   setManagedSites(userId: string, siteIds: string[]) {
     return this.request<User>('PATCH', `/users/${userId}/managed-sites`, { siteIds });
+  }
+
+  // Contrat (conformité du planning) ; null efface la valeur.
+  updateUserContract(
+    userId: string,
+    payload: { contractType?: ContractType | null; weeklyContractHours?: number | null; birthDate?: string | null },
+  ) {
+    return this.request<User>('PATCH', `/users/${userId}/contract`, payload);
+  }
+
+  // ---- Conformité du planning (droit du travail belge) ----
+  getCompliance(params: { siteId?: string; from: string; to: string }) {
+    return this.request<ComplianceReport>('GET', `/compliance${toQueryString(params)}`);
+  }
+
+  getJointCommittees() {
+    return this.request<JointCommittee[]>('GET', '/compliance/joint-committees');
+  }
+
+  // Publication malgré des alertes : tracé dans l'AuditLog.
+  acknowledgeCompliance(payload: { shiftIds: string[]; violations: ComplianceViolation[] }) {
+    return this.request<void>('POST', '/compliance/acknowledge', payload);
   }
 
   // Réglages de pointage résolus de l'utilisateur connecté — checkin-mobile

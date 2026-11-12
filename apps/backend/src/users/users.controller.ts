@@ -15,6 +15,7 @@ import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
 import { SetPinDto } from './dto/set-pin.dto';
 import { UpdateUserSettingsDto } from './dto/update-user-settings.dto';
+import { UpdateUserContractDto } from './dto/update-user-contract.dto';
 
 @ApiTags('users')
 @Controller('users')
@@ -170,6 +171,20 @@ export class UsersController {
       throw new ForbiddenException('Seul un admin peut réactiver le pointage');
     }
     return this.usersService.updateSettings(user.companyId, id, dto);
+  }
+
+  // Contrat (conformité du planning) — même périmètre que les autres réglages
+  // d'un employé.
+  @Patch(':id/contract')
+  @UseGuards(RolesGuard)
+  @Roles('admin', 'manager')
+  async updateContract(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateUserContractDto,
+  ) {
+    await this.siteScope.ensureUser(user, id);
+    return this.usersService.updateContract(user.companyId, id, dto);
   }
 
   // Magasins gérés par un manager (décision #36) — admin uniquement.

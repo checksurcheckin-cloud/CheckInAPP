@@ -9,13 +9,15 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import { ChevronLeft, ChevronRight, Plus, Send } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, Plus, Scale, Send } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows, shiftPalette } from '@horaires/ui-tokens';
 import type { Availability, ProposeShiftOnMarketPayload, Shift, Site, User } from '@horaires/shared-types';
 import { ApiError } from '@horaires/api-client';
 import { apiClient } from '../services/AuthService';
 import { canManageSite } from '../lib/siteScope';
-import { queryKeys, useAvailabilities, useShifts, useSiteScope, useUsers } from '../lib/queries';
+import { queryKeys, useAvailabilities, useCompliance, useShifts, useSiteScope, useUsers } from '../lib/queries';
+import { indexCompliance } from '../lib/compliance';
+import { CompliancePanel } from '../components/CompliancePanel';
 import { SiteSelect } from '../components/SiteSelect';
 import { PlanningGridCell } from '../components/PlanningGridCell';
 import { EmployeeRowHeader } from '../components/EmployeeRowHeader';
@@ -93,6 +95,11 @@ export function PlanningPage() {
   const [marketTarget, setMarketTarget] = useState<Shift | null>(null);
   const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  // Conformité au droit du travail (avertissements) : panneau récapitulatif,
+  // et alerte affichée juste après avoir déposé un shift qui en déclenche.
+  const [compliancePanelOpen, setCompliancePanelOpen] = useState(false);
+  const [lastPlacedShiftId, setLastPlacedShiftId] = useState<string | null>(null);
+  const [complianceNotice, setComplianceNotice] = useState<string[] | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -140,12 +147,34 @@ export function PlanningPage() {
   const shifts = shiftsQuery.data ?? NO_SHIFTS;
   const isLoading = shiftsQuery.isPending;
 
+  // Contrôle du planning affiché par le backend (droit du travail belge,
+  // selon la commission paritaire) — jamais bloquant.
+  const complianceQuery = useCompliance(selectedSiteId, rangeFrom, rangeTo);
+  const compliance = useMemo(() => indexCompliance(complianceQuery.data), [complianceQuery.data]);
+  const getComplianceIssues = useCallback((shiftId: string) => compliance.byShift.get(shiftId) ?? [], [compliance]);
+
+  // Le shift qu'on vient de déposer déclenche des alertes : on les montre
+  // tout de suite, sans attendre qu'on ouvre le panneau.
+  useEffect(() => {
+    if (!lastPlacedShiftId || complianceQuery.isFetching) return;
+    const issues = compliance.byShift.get(lastPlacedShiftId) ?? [];
+    setLastPlacedShiftId(null);
+    if (issues.length > 0) setComplianceNotice([...new Set(issues.map((v) => v.message))]);
+  }, [lastPlacedShiftId, compliance, complianceQuery.isFetching]);
+
+  useEffect(() => {
+    if (!complianceNotice) return;
+    const timer = setTimeout(() => setComplianceNotice(null), 10_000);
+    return () => clearTimeout(timer);
+  }, [complianceNotice]);
+
   // Après une action sur la grille : recharge les shifts (toutes les
   // périodes en cache) et les échanges, qui en dépendent.
   const refreshShifts = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.shifts }),
       queryClient.invalidateQueries({ queryKey: queryKeys.pendingOffers }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.compliance }),
     ]);
 
   const createTemplate = (e: React.FormEvent) => {
@@ -263,6 +292,7 @@ export function PlanningPage() {
         await apiClient.assignShift(shiftId, targetEmployeeId);
       }
       await refreshShifts();
+      setLastPlacedShiftId(shiftId);
     } catch (err) {
       setConflictMessage(err instanceof ApiError ? err.message : 'Impossible de déplacer ce shift');
     } finally {
@@ -320,6 +350,7 @@ export function PlanningPage() {
         }
       }
       await refreshShifts();
+      setLastPlacedShiftId(created.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Échec de la création du shift');
     }
@@ -346,6 +377,11 @@ export function PlanningPage() {
     if (draftIds.length === 0) return;
     setIsPublishing(true);
     try {
+      // Publié malgré des alertes : tracé dans l'AuditLog (au mieux — une
+      // trace ratée n'empêche pas de publier).
+      if (draftAlerts.length > 0) {
+        await apiClient.acknowledgeCompliance({ shiftIds: draftIds, violations: draftAlerts }).catch(() => {});
+      }
       await Promise.all(draftIds.map((id) => apiClient.updateShift(id, { status: 'published' })));
       await refreshShifts();
     } finally {
@@ -440,6 +476,9 @@ export function PlanningPage() {
 
   const readOnly = !canManageSite(scope, selectedSiteId);
   const draftCount = shifts.filter((s) => s.status === 'draft' && !isEnded(s.endsAt)).length;
+  const draftIdSet = new Set(shifts.filter((s) => s.status === 'draft' && !isEnded(s.endsAt)).map((s) => s.id));
+  const draftAlerts = compliance.alerts.filter((v) => v.shiftIds.some((id) => draftIdSet.has(id)));
+  const alertCount = compliance.alerts.length;
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -463,8 +502,38 @@ export function PlanningPage() {
             </button>
           </div>
           <SiteSelect sites={sites} value={selectedSiteId} onChange={setSelectedSiteId} />
+          <button
+            className="btn"
+            style={{
+              ...styles.complianceButton,
+              ...(alertCount > 0 ? styles.complianceButtonAlert : {}),
+            }}
+            onClick={() => setCompliancePanelOpen(true)}
+            title="Conformité du planning au droit du travail belge"
+          >
+            {alertCount > 0 ? <AlertTriangle size={14} strokeWidth={2.5} /> : <Scale size={14} strokeWidth={2.25} />}
+            {alertCount > 0 ? `${alertCount} alerte${alertCount > 1 ? 's' : ''}` : 'Conformité'}
+          </button>
         </div>
       </div>
+
+      {complianceNotice ? (
+        <div style={styles.complianceNotice} role="status">
+          <AlertTriangle size={16} color={colors.warning} strokeWidth={2.5} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div style={{ flex: 1 }}>
+            <strong>Ce placement déclenche {complianceNotice.length > 1 ? 'des alertes' : 'une alerte'} de conformité</strong>
+            {complianceNotice.map((m) => (
+              <div key={m}>{m}</div>
+            ))}
+          </div>
+          <button className="btn" style={styles.noticeLink} onClick={() => setCompliancePanelOpen(true)}>
+            Détails
+          </button>
+          <button className="btn" style={styles.noticeLink} onClick={() => setComplianceNotice(null)} aria-label="Fermer">
+            ✕
+          </button>
+        </div>
+      ) : null}
 
       {viewMode === 'week' ? (
         <div style={styles.weekNav}>
@@ -643,13 +712,19 @@ export function PlanningPage() {
                   readOnly={readOnly}
                   blockedAssigneeId={blockedAssigneeId}
                   draggedTimeRange={draggedTimeRange}
+                  getComplianceIssues={getComplianceIssues}
                 />
               ))}
 
               {/* Une ligne par employé */}
               {employees.map((user) => (
                 <React.Fragment key={user.id}>
-                  <EmployeeRowHeader user={user} totalMinutes={totalMinutesForEmployee(user.id)} />
+                  <EmployeeRowHeader
+                    user={user}
+                    totalMinutes={totalMinutesForEmployee(user.id)}
+                    complianceIssues={compliance.byUser.get(user.id)}
+                    missingContract={compliance.missingContract.has(user.id)}
+                  />
                   {days.map((date) => (
                     <PlanningGridCell
                       key={`${user.id}-${date.toISOString()}`}
@@ -668,6 +743,7 @@ export function PlanningPage() {
                       blockedAssigneeId={blockedAssigneeId}
                       draggedTimeRange={draggedTimeRange}
                       unavailabilityInfo={getUnavailabilityInfo(availabilities, user.id, date)}
+                      getComplianceIssues={getComplianceIssues}
                     />
                   ))}
                 </React.Fragment>
@@ -733,13 +809,36 @@ export function PlanningPage() {
 
       <Dialog
         open={publishConfirmOpen}
-        variant="info"
+        variant={draftAlerts.length > 0 ? 'warning' : 'info'}
         title="Publier les brouillons ?"
         message={`${draftCount} shift${draftCount > 1 ? 's' : ''} en brouillon deviendront visibles pour les employés assignés.`}
-        confirmLabel="Publier"
+        confirmLabel={draftAlerts.length > 0 ? 'Publier quand même' : 'Publier'}
         cancelLabel="Annuler"
         onConfirm={publishAllDrafts}
         onClose={() => setPublishConfirmOpen(false)}
+      >
+        {draftAlerts.length > 0 ? (
+          <div style={styles.publishAlerts}>
+            <strong>
+              {draftAlerts.length} alerte{draftAlerts.length > 1 ? 's' : ''} de conformité sur ces brouillons
+            </strong>
+            <ul style={styles.publishAlertList}>
+              {[...new Set(draftAlerts.map((v) => v.message))].slice(0, 6).map((m) => (
+                <li key={m}>{m}</li>
+              ))}
+            </ul>
+            <span style={styles.publishAlertHint}>
+              Publier quand même sera tracé dans le journal d'audit.
+            </span>
+          </div>
+        ) : null}
+      </Dialog>
+
+      <CompliancePanel
+        open={compliancePanelOpen}
+        index={compliance}
+        users={users}
+        onClose={() => setCompliancePanelOpen(false)}
       />
 
       <EditShiftDialog
@@ -853,6 +952,52 @@ const styles: Record<string, React.CSSProperties> = {
   },
   templateSentinel: { height: 0 },
   // zIndex au-dessus des cellules sticky de la grille (zIndex 2).
+  complianceButton: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacing.xs,
+    padding: `${spacing.sm}px ${spacing.md}px`,
+    borderRadius: radius.md,
+    border: `1px solid ${colors.border}`,
+    backgroundColor: colors.surface,
+    color: colors.textSecondary,
+    fontWeight: 600,
+    fontSize: typography.sizes.sm,
+    cursor: 'pointer',
+  },
+  complianceButtonAlert: { borderColor: colors.warning, color: '#92400E', backgroundColor: '#FEF3C7' },
+  complianceNotice: {
+    display: 'flex',
+    gap: spacing.sm,
+    alignItems: 'flex-start',
+    padding: `${spacing.sm}px ${spacing.md}px`,
+    marginBottom: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: '#FEF3C7',
+    border: `1px solid ${colors.warning}`,
+    color: '#78350F',
+    fontSize: typography.sizes.sm,
+    lineHeight: 1.5,
+  },
+  noticeLink: {
+    border: 'none',
+    background: 'transparent',
+    color: '#78350F',
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontSize: typography.sizes.sm,
+  },
+  publishAlerts: {
+    textAlign: 'left',
+    padding: spacing.sm,
+    marginBottom: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: '#FEF3C7',
+    color: '#78350F',
+    fontSize: typography.sizes.sm,
+  },
+  publishAlertList: { margin: `${spacing.xs}px 0`, paddingLeft: spacing.lg },
+  publishAlertHint: { fontSize: typography.sizes.xs },
   readOnlyNotice: {
     padding: `${spacing.sm}px ${spacing.md}px`,
     marginBottom: spacing.md,

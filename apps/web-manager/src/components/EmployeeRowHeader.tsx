@@ -1,14 +1,22 @@
 import React from 'react';
 import { colors, spacing, radius, typography } from '@horaires/ui-tokens';
-import type { User } from '@horaires/shared-types';
+import type { ComplianceViolation, User } from '@horaires/shared-types';
 import { formatDurationLabel } from '../lib/date';
+import { ComplianceBadge } from './ComplianceBadge';
 
-type Props = { user: User; totalMinutes: number };
+type Props = {
+  user: User;
+  totalMinutes: number;
+  // Alertes de conformité de l'employé sur la période (droit du travail).
+  complianceIssues?: ComplianceViolation[];
+  // Contrat non renseigné : contrôlé comme un temps plein majeur.
+  missingContract?: boolean;
+};
 
 // Première colonne de la grille planning, une ligne par employé : photo
 // (initiales tant qu'il n'y a pas de vraie photo de profil dans le modèle
 // User), nom, et total d'heures planifiées sur la période affichée.
-export function EmployeeRowHeader({ user, totalMinutes }: Props) {
+export function EmployeeRowHeader({ user, totalMinutes, complianceIssues = [], missingContract = false }: Props) {
   return (
     <div style={styles.row}>
       <span style={styles.avatar}>
@@ -19,7 +27,15 @@ export function EmployeeRowHeader({ user, totalMinutes }: Props) {
         <span style={styles.name}>
           {user.firstName} {user.lastName}
         </span>
-        <span style={styles.hours}>{formatDurationLabel(totalMinutes)}</span>
+        <span style={styles.hours}>
+          {formatDurationLabel(totalMinutes)}{' '}
+          <ComplianceBadge violations={complianceIssues} showCount />
+          {missingContract ? (
+            <span style={styles.missingContract} title="Contrat non renseigné (page Équipe) : contrôlé comme un temps plein majeur">
+              contrat ?
+            </span>
+          ) : null}
+        </span>
       </div>
     </div>
   );
@@ -57,5 +73,13 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   },
-  hours: { fontSize: typography.sizes.xs, color: colors.textSecondary },
+  hours: {
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+    flexWrap: 'wrap',
+  },
+  missingContract: { fontSize: 10, fontWeight: 600, color: colors.warning },
 };

@@ -1,4 +1,5 @@
-import { IsLatitude, IsLongitude, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsIn, IsLatitude, IsLongitude, IsOptional, IsString, MinLength } from 'class-validator';
+import { JOINT_COMMITTEE_CODES } from '../../compliance/rule-packs';
 
 export class CreateSiteDto {
   @IsString()
@@ -20,4 +21,9 @@ export class CreateSiteDto {
   @IsOptional()
   @IsString()
   timezone?: string;
+
+  // Commission paritaire (src/compliance/rule-packs.ts) — null = aucune.
+  @IsOptional()
+  @IsIn(JOINT_COMMITTEE_CODES)
+  jointCommittee?: string | null;
 }

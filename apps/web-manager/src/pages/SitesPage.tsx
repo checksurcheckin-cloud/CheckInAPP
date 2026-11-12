@@ -4,7 +4,7 @@ import { MapPin, Plus, Search, Trash2, Pencil, X } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { GeocodeCandidate, Site } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
-import { queryKeys, useSiteScope } from '../lib/queries';
+import { queryKeys, useJointCommittees, useSiteScope } from '../lib/queries';
 
 const NO_SITES: Site[] = [];
 
@@ -13,9 +13,11 @@ type FormState = {
   address: string;
   geoLat: string;
   geoLng: string;
+  // '' = commission paritaire de l'entreprise.
+  jointCommittee: string;
 };
 
-const EMPTY_FORM: FormState = { name: '', address: '', geoLat: '', geoLng: '' };
+const EMPTY_FORM: FormState = { name: '', address: '', geoLat: '', geoLng: '', jointCommittee: '' };
 
 export function SitesPage() {
   // Suppression de site réservée aux admins (DELETE /sites/:id, @Roles('admin')) —
@@ -26,6 +28,7 @@ export function SitesPage() {
   const sitesQuery = useSiteScope();
   const sites = sitesQuery.data?.sites ?? NO_SITES;
   const isLoading = sitesQuery.isPending;
+  const jointCommittees = useJointCommittees().data ?? [];
 
   const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -53,6 +56,7 @@ export function SitesPage() {
       address: site.address ?? '',
       geoLat: site.geoLat != null ? String(site.geoLat) : '',
       geoLng: site.geoLng != null ? String(site.geoLng) : '',
+      jointCommittee: site.jointCommittee ?? '',
     });
     setCandidates([]);
     setError(null);
@@ -98,6 +102,7 @@ export function SitesPage() {
         address: form.address.trim() || undefined,
         geoLat: form.geoLat ? Number(form.geoLat) : undefined,
         geoLng: form.geoLng ? Number(form.geoLng) : undefined,
+        jointCommittee: form.jointCommittee || null,
       };
       if (editingSiteId) {
         await apiClient.updateSite(editingSiteId, payload);
@@ -186,6 +191,22 @@ export function SitesPage() {
           </p>
         )}
 
+        <div style={styles.formRow}>
+          <select
+            value={form.jointCommittee}
+            onChange={(e) => setForm((f) => ({ ...f, jointCommittee: e.target.value }))}
+            style={{ ...styles.input, flex: 1 }}
+            aria-label="Commission paritaire du site"
+          >
+            <option value="">Commission paritaire : celle de l'entreprise (Réglages)</option>
+            {jointCommittees.map((jc) => (
+              <option key={jc.code} value={jc.code}>
+                {jc.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {error ? <p style={styles.error}>{error}</p> : null}
 
         <div style={styles.formActions}>
@@ -213,6 +234,11 @@ export function SitesPage() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <span style={styles.siteName}>{site.name}</span>
                 {site.address ? <span style={styles.siteAddress}>{site.address}</span> : null}
+                {site.jointCommittee ? (
+                  <span style={styles.siteAddress}>
+                    {jointCommittees.find((jc) => jc.code === site.jointCommittee)?.label ?? `CP ${site.jointCommittee}`}
+                  </span>
+                ) : null}
                 {site.geoLat == null || site.geoLng == null ? (
                   <span style={styles.noCoords}>Pas de coordonnées — distance GPS indisponible</span>
                 ) : null}

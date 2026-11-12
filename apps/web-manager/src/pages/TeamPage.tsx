@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { UserPlus, RefreshCw, KeyRound, Eye, EyeOff } from 'lucide-react';
+import { UserPlus, RefreshCw, KeyRound, Eye, EyeOff, Upload } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import type { Site, User, UserRole, UserStatus } from '@horaires/shared-types';
 import { apiClient, useAuth } from '../services/AuthService';
@@ -8,6 +8,8 @@ import { SiteSelect } from '../components/SiteSelect';
 import { ManagedSitesDialog, managedSitesLabel } from '../components/ManagedSitesDialog';
 import { queryKeys, useSiteScope, useUsers } from '../lib/queries';
 import { Dialog } from '../components/Dialog';
+import { ContractDialog, contractLabel } from '../components/ContractDialog';
+import { ContractImportDialog } from '../components/ContractImportDialog';
 
 const NO_USERS: User[] = [];
 const NO_SITES: Site[] = [];
@@ -57,6 +59,9 @@ export function TeamPage() {
   const scope = scopeQuery.data?.scope ?? null;
   const scoped = scope !== null && !scope.allSites;
   const [managedTarget, setManagedTarget] = useState<User | null>(null);
+  // Contrat (conformité du planning) : édition d'un employé, ou import CSV.
+  const [contractTarget, setContractTarget] = useState<User | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   const managedSiteIds = useMemo(
     () => (scopeQuery.data?.managedSites ?? NO_SITES).map((m) => m.id),
     [scopeQuery.data],
@@ -229,6 +234,11 @@ export function TeamPage() {
     <div>
       <div style={styles.headerRow}>
         <h1 style={{ ...styles.title, marginBottom: 0 }}>Équipe</h1>
+        <div style={{ flex: 1 }} />
+        <button type="button" className="btn" style={styles.smallButton} onClick={() => setIsImportOpen(true)}>
+          <Upload size={13} strokeWidth={2.25} />
+          Importer les contrats
+        </button>
         <SiteSelect
           sites={sites}
           value={siteFilter}
@@ -298,6 +308,7 @@ export function TeamPage() {
               <th style={styles.th}>Email</th>
               <th style={styles.th}>Rôle</th>
               <th style={styles.th}>Site</th>
+              <th style={styles.th}>Contrat</th>
               <th style={styles.th}>Statut</th>
               <th style={styles.th}>Badge</th>
               <th style={styles.th}>PIN</th>
@@ -308,7 +319,7 @@ export function TeamPage() {
           <tbody>
             {visibleUsers.length === 0 ? (
               <tr>
-                <td style={styles.td} colSpan={9}>
+                <td style={styles.td} colSpan={10}>
                   <span style={styles.muted}>Aucun employé pour ce magasin.</span>
                 </td>
               </tr>
@@ -368,6 +379,22 @@ export function TeamPage() {
                       {u.role === 'manager' ? managedSitesLabel(u, sites) : 'Tous les magasins'}
                     </span>
                   )}
+                </td>
+                <td style={styles.td}>
+                  <button
+                    type="button"
+                    className="btn"
+                    style={{
+                      ...styles.inlineSelect,
+                      color: contractLabel(u) ? colors.textPrimary : colors.warning,
+                      backgroundColor: colors.surface,
+                    }}
+                    disabled={busyUserId === u.id || !canManage(u)}
+                    onClick={() => setContractTarget(u)}
+                    title="Utilisé pour vérifier le planning avec le droit du travail"
+                  >
+                    {contractLabel(u) ?? 'À renseigner'} ▾
+                  </button>
                 </td>
                 <td style={styles.td}>
                   {canEditAccess(u) && canManage(u) ? (
@@ -444,6 +471,28 @@ export function TeamPage() {
         </table>
         </div>
       )}
+
+      <ContractDialog
+        employee={contractTarget}
+        onClose={() => setContractTarget(null)}
+        onSave={async (userId, payload) => {
+          await apiClient.updateUserContract(userId, payload);
+          await load();
+          void queryClient.invalidateQueries({ queryKey: queryKeys.compliance });
+        }}
+      />
+
+      <ContractImportDialog
+        open={isImportOpen}
+        users={users}
+        canManage={canManage}
+        onClose={() => setIsImportOpen(false)}
+        onImport={async (rows) => {
+          for (const row of rows) await apiClient.updateUserContract(row.userId, row.payload);
+          await load();
+          void queryClient.invalidateQueries({ queryKey: queryKeys.compliance });
+        }}
+      />
 
       <ManagedSitesDialog
         manager={managedTarget}

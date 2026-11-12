@@ -21,6 +21,16 @@ enum UserStatus {
   disabled
 }
 
+// Type de contrat — détermine les règles de conformité du planning
+// (src/compliance) : temps partiel, étudiant et flexi-job n'ont pas les
+// mêmes limites qu'un temps plein.
+enum ContractType {
+  full_time
+  part_time
+  student
+  flexi_job
+}
+
 enum ShiftStatus {
   draft
   published
@@ -86,6 +96,9 @@ model Company {
   // Pointage disparaît de checkin-mobile (décision #35). Surchargeable par
   // employé via User.mobileClockInEnabled.
   mobileClockInEnabled Boolean @default(true) @map("mobile_clock_in_enabled")
+  // Commission paritaire ("302", "201", "140.03"…) : choisit le jeu de règles
+  // de conformité du planning (src/compliance). Surchargeable par site.
+  jointCommittee String? @map("joint_committee")
   createdAt DateTime @default(now()) @map("created_at")
 
   sites     Site[]
@@ -104,6 +117,9 @@ model Site {
   geoLat    Decimal? @map("geo_lat")
   geoLng    Decimal? @map("geo_lng")
   timezone  String   @default("Europe/Brussels")
+  // Commission paritaire propre à ce site (ex. service de livraison d'un
+  // restaurant) — null = celle de l'entreprise.
+  jointCommittee String? @map("joint_committee")
 
   devices     SiteDevice[]
   shifts      Shift[]
@@ -161,6 +177,12 @@ model User {
   gpsClockInEnabled Boolean? @map("gps_clock_in_enabled")
   // Même principe pour le pointage depuis l'app mobile (Company.mobileClockInEnabled).
   mobileClockInEnabled Boolean? @map("mobile_clock_in_enabled")
+  // Contrat — utilisé seulement par les contrôles de conformité du planning.
+  // null = non renseigné : le contrôle le signale au lieu de deviner.
+  contractType        ContractType? @map("contract_type")
+  weeklyContractHours Float?        @map("weekly_contract_hours")
+  // Pour les règles des moins de 18 ans (nuit, repos, durées).
+  birthDate           DateTime?     @db.Date @map("birth_date")
   createdAt    DateTime   @default(now()) @map("created_at")
 
   timeEntries         TimeEntry[]       @relation("UserTimeEntries")

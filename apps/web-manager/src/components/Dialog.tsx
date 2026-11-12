@@ -13,6 +13,8 @@ type Props = {
   cancelLabel?: string;
   onConfirm?: () => void;
   onClose: () => void;
+  // Contenu supplémentaire sous le message (liste, détail…).
+  children?: React.ReactNode;
 };
 
 const VARIANT_STYLES: Record<Variant, { background: string; color: string; Icon: typeof Info }> = {
@@ -32,6 +34,7 @@ export function Dialog({
   cancelLabel = 'Fermer',
   onConfirm,
   onClose,
+  children,
 }: Props) {
   if (!open) return null;
 
@@ -45,6 +48,7 @@ export function Dialog({
         </div>
         <h2 style={styles.title}>{title}</h2>
         <p style={styles.message}>{message}</p>
+        {children}
         <div style={styles.actions}>
           <button className="btn" style={styles.secondaryButton} onClick={onClose}>
             {cancelLabel}

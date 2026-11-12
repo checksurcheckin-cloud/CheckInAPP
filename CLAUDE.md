@@ -959,6 +959,54 @@ Cible : PME de 20-100 employés par site.
     403 (`enablesClockIn`, `users/clock-in-settings.ts`). Les réglages
     entreprise restent admin uniquement (décision #37).
 
+39. **Contrôle de conformité du planning au droit du travail belge, par
+    commission paritaire — AVERTISSEMENTS uniquement, jamais bloquants.**
+    Choix produit explicite : le planning ne connaît ni le règlement de
+    travail ni les dérogations de chaque entreprise ; un blocage empêcherait
+    de travailler. Secteurs visés : horeca, bars et discothèques (CP 302),
+    commerce de détail (CP 201, 202, 311) et livreurs (SCP 140.03).
+    - **Données** : `Company.jointCommittee` (Réglages, admin), surchargeable
+      par `Site.jointCommittee` (page Sites — ex. service de livraison d'un
+      restaurant) ; par employé `contractType` (temps plein / partiel /
+      étudiant / flexi-job), `weeklyContractHours`, `birthDate` (page Équipe,
+      colonne Contrat, ou import CSV `ContractImportDialog` — email, contrat,
+      heures, naissance ; `PATCH /users/:id/contract`, même périmètre que les
+      autres réglages d'un employé, décision #36). Non renseigné = contrôlé
+      comme un temps plein majeur, et signalé (« contrat ? »).
+    - **Backend arbitre** (`src/compliance`) : `rule-packs.ts` = socle légal
+      (loi du 16 mars 1971) + paramètres par CP, chaque valeur avec sa source,
+      celles non confirmées listées dans `toValidate` ; `compliance.engine.ts`
+      = fonctions pures, à l'heure LOCALE du site (décision #21), sur TOUS les
+      shifts de l'employé tous sites confondus (limites personnelles), avec
+      une marge de 8 jours autour de la période (repos) et toute l'année pour
+      un étudiant (contingent). `GET /compliance?siteId&from&to` (45 jours
+      max, admin/manager, lecture libre comme le planning).
+    - **Règles** : 8 h/j et 40 h/sem (avertissement : seulement avec un régime
+      flexible au règlement de travail), 11 h/j et 50 h/sem (infraction),
+      11 h de repos entre deux journées (une coupure le même jour n'en est pas
+      une), 35 h de repos hebdomadaire, prestation minimale 3 h (2 h temps
+      partiel CP 302), pause au-delà de 6 h (rappel), dimanche (commerce :
+      8 h – midi sauf dérogation ; horeca/transport : repos compensatoire dans
+      les 6 jours), nuit 20 h – 6 h (commerce : à vérifier), mineurs (8 h,
+      40 h, 12 h de repos, ni nuit ni dimanche), délai de communication d'un
+      temps partiel (7 jours ouvrables, 3 en CP 302 — seulement pour un
+      brouillon, « si publié maintenant »), heures complémentaires (rappel),
+      contingent étudiant (650 h, à valider). Durées = durée du shift, pauses
+      non déduites (le planning ne les connaît pas).
+    - **web-manager** : pastille sur les cartes et compteur par employé
+      (`ComplianceBadge`), bouton « N alertes » / « Conformité » qui ouvre
+      `CompliancePanel`, bandeau juste après une dépose qui déclenche une
+      alerte, et « Publier N brouillons » liste les alertes puis propose
+      « Publier quand même » — tracé dans l'`AuditLog`
+      (`compliance_warnings_acknowledged`, `POST /compliance/acknowledge`,
+      première écriture de cette table). Les `info` ne s'affichent que dans
+      le panneau.
+    - **À faire valider** par un secrétariat social avant de présenter ces
+      contrôles comme « conformes » ; les règles propres à chaque CP (CCT
+      sectorielles) restent partielles. Pas de jours fériés, ni de
+      dérogations individuelles, ni de calcul sur la période de référence
+      (moyenne de 38 h).
+
 ## Stack
 
 - Backend : NestJS + PostgreSQL + Prisma + Passport/JWT
@@ -1100,9 +1148,9 @@ reste "à faire".
 1. Pas de révocation de session côté backend (voir logout ci-dessus) — à
    traiter avant toute exigence de sécurité plus stricte (déconnexion à
    distance, expiration forcée)
-2. `AuditLog` existe dans le schéma mais n'est écrit par aucun service —
-   pertinent pour l'exigence légale de traçabilité du pointage (2027), pas
-   juste un nice-to-have
+2. `AuditLog` n'est écrit que par la publication malgré des alertes de
+   conformité (décision #39) — toujours rien pour le pointage, alors que c'est
+   pertinent pour l'exigence légale de traçabilité (2027)
 3. Consultation par l'employé de ses propres pointages : faite (Profil de
    checkin-mobile, carte « Mes pointages » — `TimeEntryHistory`, mois par
    mois, heures travaillées par jour pauses déduites, `lib/timeEntryHistory.ts`).

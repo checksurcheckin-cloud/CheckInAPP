@@ -2,7 +2,7 @@ import React from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import { Ban } from 'lucide-react';
 import { colors, spacing, radius, typography } from '@horaires/ui-tokens';
-import type { Availability, Shift } from '@horaires/shared-types';
+import type { Availability, ComplianceViolation, Shift } from '@horaires/shared-types';
 import { addDays, combineDateAndTime, durationMinutesFromTimeRange, fractionOfDay, isEnded } from '../lib/date';
 import { isEmployeeAvailableForShift, type UnavailabilityInfo } from '../lib/availability';
 import { ShiftCard } from './ShiftCard';
@@ -38,6 +38,8 @@ type Props = {
   // uniquement pour l'affichage (fond + étiquette), voir lib/availability.ts.
   unavailabilityInfo?: UnavailabilityInfo;
   mint?: boolean;
+  // Alertes de conformité par shift (PlanningPage, GET /compliance).
+  getComplianceIssues?: (shiftId: string) => ComplianceViolation[];
 };
 
 // Cellule (employé x jour), ou (pool x jour) sur la ligne "Shifts
@@ -60,6 +62,7 @@ export function PlanningGridCell({
   draggedTimeRange,
   unavailabilityInfo = { kind: 'none' },
   mint,
+  getComplianceIssues,
 }: Props) {
   // Contrairement à l'étiquette affichée (qui reflète l'indisponibilité
   // déclarée telle quelle), la dépose n'est bloquée que si l'élément
@@ -140,6 +143,7 @@ export function PlanningGridCell({
           onEdit={onEditShift}
           onPublish={onPublishShift}
           busy={busyId === shift.id}
+          complianceIssues={getComplianceIssues?.(shift.id)}
         />
       ))}
     </div>

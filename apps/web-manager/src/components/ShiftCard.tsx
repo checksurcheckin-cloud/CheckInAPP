@@ -3,10 +3,11 @@ import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { Copy, Lock, Megaphone, Send, X } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
-import type { Shift } from '@horaires/shared-types';
+import type { ComplianceViolation, Shift } from '@horaires/shared-types';
 import { DRAG_CURSOR, DRAG_CURSOR_ACTIVE } from '../lib/cursors';
 import { durationMinutes, formatDurationLabel, isEnded } from '../lib/date';
 import { marketScopeLabel } from './MarketProposalDialog';
+import { ComplianceBadge } from './ComplianceBadge';
 
 type Props = {
   shift: Shift;
@@ -27,6 +28,8 @@ type Props = {
   onEdit: (shift: Shift) => void;
   onPublish: (shiftId: string) => void;
   busy: boolean;
+  // Alertes de conformité (droit du travail) qui touchent ce shift.
+  complianceIssues?: ComplianceViolation[];
 };
 
 // Toute la carte est la poignée de glisser-déposer : on la lâche sur une
@@ -48,6 +51,7 @@ export function ShiftCard({
   onEdit,
   onPublish,
   busy,
+  complianceIssues = [],
 }: Props) {
   const hasAssignment = (shift.assignments ?? []).length > 0;
   const isDraft = shift.status === 'draft';
@@ -119,6 +123,11 @@ export function ShiftCard({
           </span>
         ) : isDraft ? (
           <span style={styles.draftTag}>Brouillon</span>
+        ) : null}
+        {complianceIssues.length > 0 && !ended ? (
+          <span style={{ display: 'block', marginBottom: 2 }}>
+            <ComplianceBadge violations={complianceIssues} />
+          </span>
         ) : null}
         <span style={{ ...styles.time, color: palette.text }}>
           {new Date(shift.startsAt).toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' })}

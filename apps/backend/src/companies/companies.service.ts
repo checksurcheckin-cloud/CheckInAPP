@@ -22,7 +22,11 @@ export class CompaniesService {
   async updateSettings(companyId: string, dto: UpdateCompanySettingsDto) {
     const company = await this.prisma.company.update({
       where: { id: companyId },
-      data: { gpsClockInEnabled: dto.gpsClockInEnabled, mobileClockInEnabled: dto.mobileClockInEnabled },
+      data: {
+        gpsClockInEnabled: dto.gpsClockInEnabled,
+        mobileClockInEnabled: dto.mobileClockInEnabled,
+        jointCommittee: dto.jointCommittee,
+      },
     });
     // checkin-mobile affiche/masque l'onglet Pointage en direct (décision #35).
     this.realtime.emitToCompany(companyId, 'settings:changed');

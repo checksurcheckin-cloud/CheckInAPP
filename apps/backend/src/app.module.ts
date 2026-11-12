@@ -12,6 +12,7 @@ import { GeocodingModule } from './geocoding/geocoding.module';
 import { SiteScopeModule } from './site-scope/site-scope.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { ComplianceModule } from './compliance/compliance.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     AvailabilitiesModule,
     GeocodingModule,
     NotificationsModule,
+    ComplianceModule,
   ],
 })
 export class AppModule {}

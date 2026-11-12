@@ -10,6 +10,7 @@ import { SetPinDto } from './dto/set-pin.dto';
 import { decryptPin, encryptPin, randomPin } from './pin-cipher';
 import { UpdateUserSettingsDto } from './dto/update-user-settings.dto';
 import { CLOCK_IN_SETTINGS_SELECT, resolveClockInSettings } from './clock-in-settings';
+import { UpdateUserContractDto } from './dto/update-user-contract.dto';
 
 const SALT_ROUNDS = 12;
 const MAX_PIN_FAILURES = 5;
@@ -28,6 +29,9 @@ const SAFE_USER_SELECT = {
   gpsClockInEnabled: true,
   mobileClockInEnabled: true,
   siteId: true,
+  contractType: true,
+  weeklyContractHours: true,
+  birthDate: true,
   // Magasins gérés (managers, décision #36) — vide = tous.
   managedSites: { select: { siteId: true } },
   createdAt: true,
@@ -235,6 +239,19 @@ export class UsersService implements OnApplicationBootstrap {
       throw new NotFoundException('Utilisateur introuvable');
     }
     return resolveClockInSettings(user);
+  }
+
+  async updateContract(companyId: string, id: string, dto: UpdateUserContractDto) {
+    await this.findOne(companyId, id);
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        contractType: dto.contractType,
+        weeklyContractHours: dto.weeklyContractHours,
+        birthDate: dto.birthDate === undefined ? undefined : dto.birthDate === null ? null : new Date(dto.birthDate),
+      },
+      select: SAFE_USER_SELECT,
+    });
   }
 
   // DTO (undefined) reste inchangé — Prisma ignore les clés `undefined`.

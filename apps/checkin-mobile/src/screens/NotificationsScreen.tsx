@@ -7,7 +7,7 @@ import { colors } from '@horaires/ui-tokens';
 import { fonts } from '../theme';
 import { useNotifications } from '../services/Notifications';
 import { withPressedFeedback } from '../lib/pressedStyle';
-import { NOTIFICATION_TARGET_TAB } from '../lib/notificationTargets';
+import { notificationRoute } from '../lib/notificationTargets';
 
 // Une couleur par type, reprise des codes de l'app : bleu = planning, vert =
 // réussite, turquoise = marché (pastille « Libre » du marché).
@@ -111,7 +111,7 @@ export function NotificationsScreen() {
 
   const open = (notification: AppNotification) => {
     markRead(notification.id);
-    navigation.navigate('Main', { screen: NOTIFICATION_TARGET_TAB[notification.type] });
+    navigation.navigate('Main', notificationRoute(notification.type, notification.shiftId));
   };
 
   const renderItem = ({ item }: { item: AppNotification }) => {

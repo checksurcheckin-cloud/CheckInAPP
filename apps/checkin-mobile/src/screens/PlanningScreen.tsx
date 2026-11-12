@@ -1,6 +1,7 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Animated, FlatList, StyleSheet, RefreshControl, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
 import { colors, spacing } from '@horaires/ui-tokens';
 import type { Shift, Site } from '@horaires/shared-types';
 import { useAuth } from '../services/AuthService';
@@ -68,6 +69,10 @@ type ListRow =
   | { kind: 'week'; key: string; number: number; range: string; count: number; isCurrent: boolean }
   | { kind: 'shift'; key: string; shift: Shift };
 
+// À l'ouverture de l'écran : sur le shift en cours / prochain ('next'), ou
+// sur la semaine d'un shift précis (ouverture depuis une notification).
+type FocusRequest = { mode: 'next' } | { mode: 'week'; shiftId: string };
+
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
@@ -88,10 +93,12 @@ function capitalize(s: string) {
 // visible, jamais emportée par le scroll.
 export function PlanningScreen() {
   const { user } = useAuth();
+  const route = useRoute<any>();
   // Depuis le cache : affiché tout de suite (hors ligne compris), rechargé
   // en arrière-plan, et à chaque `shifts:changed` (un manager publie ou
   // modifie un shift pendant que l'écran est ouvert).
-  const shifts = useMyShifts().data ?? NO_SHIFTS;
+  const myShiftsQuery = useMyShifts();
+  const shifts = myShiftsQuery.data ?? NO_SHIFTS;
   const sites = useSites().data ?? NO_SITES;
   useRefreshOnFocus(REFRESHED_KEYS);
   const refreshNow = useManualRefresh(REFRESHED_KEYS);
@@ -177,7 +184,71 @@ export function PlanningScreen() {
     return next?.id ?? null;
   }, [shifts]);
 
+  // Chaque arrivée sur l'écran recentre la liste : sur la semaine du shift
+  // d'une notification si on vient de l'ouvrir (focusShiftId, voir
+  // lib/notificationTargets.ts), sinon sur le shift en cours ou le prochain.
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
+  const [pendingScrollKey, setPendingScrollKey] = useState<string | null>(null);
+  const handledFocusNonce = useRef<number | null>(null);
+  const focusShiftId: string | undefined = route.params?.focusShiftId;
+  const focusNonce: number | undefined = route.params?.focusNonce;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (focusShiftId && focusNonce && handledFocusNonce.current !== focusNonce) {
+        handledFocusNonce.current = focusNonce;
+        setFocusRequest({ mode: 'week', shiftId: focusShiftId });
+      } else {
+        setFocusRequest({ mode: 'next' });
+      }
+    }, [focusShiftId, focusNonce]),
+  );
+
+  useEffect(() => {
+    if (!focusRequest || myShiftsQuery.data === undefined) return;
+    let target: Shift | undefined;
+    let scrollToWeek = false;
+    if (focusRequest.mode === 'week') {
+      target = shifts.find((s) => s.id === focusRequest.shiftId);
+      // Shift tout juste publié, pas encore dans le cache : attendre le
+      // rechargement lancé à l'arrivée sur l'écran.
+      if (!target && myShiftsQuery.isFetching) return;
+      scrollToWeek = Boolean(target);
+    }
+    target ??= shifts.find((s) => s.id === nextShiftId);
+    setFocusRequest(null);
+    if (!target) {
+      setMonthAnchor(startOfMonth(today));
+      return;
+    }
+    const start = new Date(target.startsAt);
+    setMonthAnchor(startOfMonth(start));
+    setPendingScrollKey(scrollToWeek ? `week-${startOfWeek(start).getTime()}` : target.id);
+  }, [focusRequest, shifts, myShiftsQuery.data, myShiftsQuery.isFetching, nextShiftId, today]);
+
+  // Défile une fois la liste du bon mois construite. Une carte en tête de
+  // sa semaine amène aussi l'en-tête de semaine à l'écran.
+  useEffect(() => {
+    if (!pendingScrollKey) return;
+    let index = rows.findIndex((r) => r.key === pendingScrollKey);
+    if (index < 0) return;
+    setPendingScrollKey(null);
+    if (rows[index - 1]?.kind === 'week') index -= 1;
+    requestAnimationFrame(() => {
+      if (index === 0) listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      else listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 });
+    });
+  }, [rows, pendingScrollKey]);
+
+  // Cartes de hauteur variable : si la ligne visée n'est pas encore
+  // mesurée, on s'en approche puis on réessaie.
+  const onScrollToIndexFailed = ({ index, averageItemLength }: { index: number; averageItemLength: number }) => {
+    listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
+    setTimeout(() => listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 }), 100);
+  };
+
   const goToMonth = (delta: number) => {
+    setPendingScrollKey(null);
     setMonthAnchor((prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1));
     // Remonte la liste et redéplie la grille — un nouveau mois se présente
     // toujours en entier, pas à moitié réduit sur le scroll du précédent.
@@ -346,6 +417,7 @@ export function PlanningScreen() {
         scrollEventThrottle={16}
         ListEmptyComponent={<Text style={styles.empty}>Aucun shift ce mois-ci.</Text>}
         renderItem={renderRow}
+        onScrollToIndexFailed={onScrollToIndexFailed}
       />
     </View>
   );

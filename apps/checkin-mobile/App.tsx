@@ -14,7 +14,7 @@ import { FloatingTabBar } from './src/components/FloatingTabBar';
 import { ClockInSettingsProvider, useClockInSettings } from './src/services/ClockInSettings';
 import { NotificationsProvider } from './src/services/Notifications';
 import { registerForPush } from './src/services/PushNotifications';
-import { NOTIFICATION_TARGET_TAB } from './src/lib/notificationTargets';
+import { NOTIFICATION_TARGET_TAB, notificationRoute } from './src/lib/notificationTargets';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { queryClient, persistOptions } from './src/lib/queryClient';
 import { useRealtimeInvalidation } from './src/lib/queries';
@@ -94,7 +94,8 @@ function usePushNotifications(isSignedIn: boolean) {
     if (!isSignedIn || !lastResponse) return;
     const id = lastResponse.notification.request.identifier;
     if (handledId.current === id) return;
-    const type = lastResponse.notification.request.content.data?.type as NotificationType | undefined;
+    const data = lastResponse.notification.request.content.data;
+    const type = data?.type as NotificationType | undefined;
     const tab = type ? NOTIFICATION_TARGET_TAB[type] : undefined;
     if (!tab) return;
     if (!navigationRef.isReady()) {
@@ -105,7 +106,7 @@ function usePushNotifications(isSignedIn: boolean) {
       return;
     }
     handledId.current = id;
-    navigationRef.navigate('Main', { screen: tab });
+    navigationRef.navigate('Main', notificationRoute(type!, data?.shiftId as string | undefined));
   }, [isSignedIn, lastResponse, retry]);
 }
 

@@ -18,6 +18,7 @@ import {
 import { ConfirmationBanner } from '../components/ConfirmationBanner';
 import { fonts } from '../theme';
 import { NotificationBell } from '../components/NotificationBell';
+import { ProfileButton } from '../components/ProfileButton';
 import { findBlockingUnavailability, toDateOnlyString, type BlockingUnavailability } from '../lib/unavailability';
 
 type OwnAssignment = { kind: 'own'; id: string; shift: Shift; assignment: ShiftAssignment };
@@ -401,11 +402,13 @@ export function ShiftMarketplaceScreen() {
             <Text style={styles.title}>Marché de shifts</Text>
             <View style={styles.headerActions}>
               <NotificationBell />
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {`${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()}
-                </Text>
-              </View>
+              <ProfileButton>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {`${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()}
+                  </Text>
+                </View>
+              </ProfileButton>
             </View>
           </View>
 

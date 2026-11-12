@@ -12,6 +12,7 @@ const NO_SHIFTS: Shift[] = [];
 const NO_SITES: Site[] = [];
 const REFRESHED_KEYS = [queryKeys.myShifts, queryKeys.sites];
 import { NotificationBell } from '../components/NotificationBell';
+import { ProfileButton } from '../components/ProfileButton';
 
 const STATUS_LABELS: Record<string, string> = {
   assigned: 'Assigné',
@@ -27,6 +28,9 @@ const MONTHS = [
   'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
   'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre',
 ];
+// Espace entre deux cartes de la liste — aussi laissé sous le bloc du mois
+// quand l'écran amène une carte en haut.
+const LIST_GAP = 12;
 // Distance de scroll (px) sur laquelle la grille se réduit complètement —
 // au-delà, elle reste minimisée (extrapolate: 'clamp').
 const COLLAPSE_DISTANCE = 130;
@@ -70,8 +74,12 @@ type ListRow =
   | { kind: 'shift'; key: string; shift: Shift };
 
 // À l'ouverture de l'écran : sur le shift en cours / prochain ('next'), ou
-// sur la semaine d'un shift précis (ouverture depuis une notification).
-type FocusRequest = { mode: 'next' } | { mode: 'week'; shiftId: string };
+// sur un shift précis depuis une notification — l'en-tête de sa semaine
+// ('week') ou sa carte ('shift').
+type FocusRequest = { mode: 'next' } | { mode: 'week' | 'shift'; shiftId: string };
+// `exact` : la carte visée elle-même en haut, sans remonter à l'en-tête de
+// sa semaine.
+type PendingScroll = { key: string; exact: boolean };
 
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
@@ -188,32 +196,37 @@ export function PlanningScreen() {
   // d'une notification si on vient de l'ouvrir (focusShiftId, voir
   // lib/notificationTargets.ts), sinon sur le shift en cours ou le prochain.
   const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null);
-  const [pendingScrollKey, setPendingScrollKey] = useState<string | null>(null);
+  const [pendingScroll, setPendingScroll] = useState<PendingScroll | null>(null);
+  // Hauteur visible de la liste, et espace ajouté sous la dernière carte pour
+  // qu'une carte de fin de mois puisse quand même remonter en haut.
+  const [listHeight, setListHeight] = useState(0);
+  const [footerSpace, setFooterSpace] = useState(0);
   const handledFocusNonce = useRef<number | null>(null);
   const focusShiftId: string | undefined = route.params?.focusShiftId;
   const focusNonce: number | undefined = route.params?.focusNonce;
+  const focusMode: 'week' | 'shift' = route.params?.focusMode === 'shift' ? 'shift' : 'week';
 
   useFocusEffect(
     useCallback(() => {
       if (focusShiftId && focusNonce && handledFocusNonce.current !== focusNonce) {
         handledFocusNonce.current = focusNonce;
-        setFocusRequest({ mode: 'week', shiftId: focusShiftId });
+        setFocusRequest({ mode: focusMode, shiftId: focusShiftId });
       } else {
         setFocusRequest({ mode: 'next' });
       }
-    }, [focusShiftId, focusNonce]),
+    }, [focusShiftId, focusNonce, focusMode]),
   );
 
   useEffect(() => {
     if (!focusRequest || myShiftsQuery.data === undefined) return;
     let target: Shift | undefined;
-    let scrollToWeek = false;
-    if (focusRequest.mode === 'week') {
+    let found = false;
+    if (focusRequest.mode !== 'next') {
       target = shifts.find((s) => s.id === focusRequest.shiftId);
       // Shift tout juste publié, pas encore dans le cache : attendre le
       // rechargement lancé à l'arrivée sur l'écran.
       if (!target && myShiftsQuery.isFetching) return;
-      scrollToWeek = Boolean(target);
+      found = Boolean(target);
     }
     target ??= shifts.find((s) => s.id === nextShiftId);
     setFocusRequest(null);
@@ -223,32 +236,44 @@ export function PlanningScreen() {
     }
     const start = new Date(target.startsAt);
     setMonthAnchor(startOfMonth(start));
-    setPendingScrollKey(scrollToWeek ? `week-${startOfWeek(start).getTime()}` : target.id);
+    if (found && focusRequest.mode === 'week') {
+      setPendingScroll({ key: `week-${startOfWeek(start).getTime()}`, exact: false });
+    } else {
+      setPendingScroll({ key: target.id, exact: found && focusRequest.mode === 'shift' });
+    }
   }, [focusRequest, shifts, myShiftsQuery.data, myShiftsQuery.isFetching, nextShiftId, today]);
 
   // Défile une fois la liste du bon mois construite. Une carte en tête de
   // sa semaine amène aussi l'en-tête de semaine à l'écran.
   useEffect(() => {
-    if (!pendingScrollKey) return;
-    let index = rows.findIndex((r) => r.key === pendingScrollKey);
+    if (!pendingScroll) return;
+    let index = rows.findIndex((r) => r.key === pendingScroll.key);
     if (index < 0) return;
-    setPendingScrollKey(null);
-    if (rows[index - 1]?.kind === 'week') index -= 1;
-    requestAnimationFrame(() => {
+    setPendingScroll(null);
+    if (!pendingScroll.exact && rows[index - 1]?.kind === 'week') index -= 1;
+    // La liste grandit quand la grille du calendrier se replie au scroll :
+    // compter sa hauteur aussi.
+    setFooterSpace(listHeight + (gridHeight ?? 0));
+    // Laisse le temps à l'espace du bas d'être rendu avant de défiler.
+    setTimeout(() => {
       if (index === 0) listRef.current?.scrollToOffset({ offset: 0, animated: true });
-      else listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 });
-    });
-  }, [rows, pendingScrollKey]);
+      else listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0, viewOffset: LIST_GAP });
+    }, 50);
+  }, [rows, pendingScroll, listHeight, gridHeight]);
 
   // Cartes de hauteur variable : si la ligne visée n'est pas encore
   // mesurée, on s'en approche puis on réessaie.
   const onScrollToIndexFailed = ({ index, averageItemLength }: { index: number; averageItemLength: number }) => {
     listRef.current?.scrollToOffset({ offset: index * averageItemLength, animated: false });
-    setTimeout(() => listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0 }), 100);
+    setTimeout(
+      () => listRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0, viewOffset: LIST_GAP }),
+      100,
+    );
   };
 
   const goToMonth = (delta: number) => {
-    setPendingScrollKey(null);
+    setPendingScroll(null);
+    setFooterSpace(0);
     setMonthAnchor((prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1));
     // Remonte la liste et redéplie la grille — un nouveau mois se présente
     // toujours en entier, pas à moitié réduit sur le scroll du précédent.
@@ -343,11 +368,13 @@ export function PlanningScreen() {
         <Text style={styles.title}>Planning</Text>
         <View style={styles.headerActions}>
           <NotificationBell />
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {`${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()}
-            </Text>
-          </View>
+          <ProfileButton>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {`${user?.firstName?.[0] ?? ''}${user?.lastName?.[0] ?? ''}`.toUpperCase()}
+              </Text>
+            </View>
+          </ProfileButton>
         </View>
       </View>
 
@@ -418,6 +445,8 @@ export function PlanningScreen() {
         ListEmptyComponent={<Text style={styles.empty}>Aucun shift ce mois-ci.</Text>}
         renderItem={renderRow}
         onScrollToIndexFailed={onScrollToIndexFailed}
+        onLayout={(e) => setListHeight(e.nativeEvent.layout.height)}
+        ListFooterComponent={<View style={{ height: footerSpace }} />}
       />
     </View>
   );
@@ -484,7 +513,7 @@ const styles = StyleSheet.create({
   dayDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: 'transparent' },
   dayDotFilled: { backgroundColor: colors.primary },
 
-  listContent: { paddingTop: 4, paddingBottom: 110, gap: 12 },
+  listContent: { paddingTop: 4, paddingBottom: 110, gap: LIST_GAP },
   // En-tête de semaine : « S47 · 16 – 22 nov. ——— 3 shifts ».
   weekHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
   weekBadge: {

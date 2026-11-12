@@ -1012,7 +1012,7 @@ reste "à faire".
     « jusqu'à », pas les deux — via « Préciser une plage horaire », voir
     décision #8 ; rebasculer un jour récurrent vers Disponible ouvre un
     choix garder-la-récurrence/annuler, décision #18), Marché de shifts,
-    Profil (logout) — les mêmes écrans pour tous les rôles (décision #31)
+    Profil (PIN, historique de ses pointages du mois, logout) — les mêmes écrans pour tous les rôles (décision #31)
   - **checkin-pos** : Pairing d'appareil, Accueil kiosk (scan QR), Saisie PIN,
     Enrôlement badge, Écran hors-ligne
   - **web-manager** : Login, Planning (grille employés x jours, création/
@@ -1103,9 +1103,11 @@ reste "à faire".
 2. `AuditLog` existe dans le schéma mais n'est écrit par aucun service —
    pertinent pour l'exigence légale de traçabilité du pointage (2027), pas
    juste un nice-to-have
-3. Pas d'écran de consultation/export des données de pointage par l'employé
-   lui-même — à vérifier au regard de l'exigence "accessible" de la
-   conformité belge
+3. Consultation par l'employé de ses propres pointages : faite (Profil de
+   checkin-mobile, carte « Mes pointages » — `TimeEntryHistory`, mois par
+   mois, heures travaillées par jour pauses déduites, `lib/timeEntryHistory.ts`).
+   Reste l'**export** (PDF/CSV) — à vérifier au regard de l'exigence
+   "accessible" de la conformité belge
 
 ## Conventions de code
 

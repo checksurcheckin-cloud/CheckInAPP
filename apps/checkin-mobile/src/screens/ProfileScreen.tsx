@@ -1,9 +1,11 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert, ScrollView, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, typography, nativeShadow } from '@horaires/ui-tokens';
 import { useFocusEffect } from '@react-navigation/native';
 import { apiClient, useAuth } from '../services/AuthService';
+import { TimeEntryHistory } from '../components/TimeEntryHistory';
+import { queryKeys, useManualRefresh, useRefreshOnFocus } from '../lib/queries';
 import { fonts } from '../theme';
 
 const ROLE_LABELS: Record<string, string> = {
@@ -11,6 +13,8 @@ const ROLE_LABELS: Record<string, string> = {
   manager: 'Manager',
   employee: 'Employé',
 };
+
+const REFRESHED_KEYS = [queryKeys.myTimeEntries];
 
 function initials(firstName?: string, lastName?: string) {
   return `${firstName?.[0] ?? ''}${lastName?.[0] ?? ''}`.toUpperCase();
@@ -22,6 +26,15 @@ export function ProfileScreen() {
   // besoin. undefined = pas encore chargé, null = aucun PIN attribué.
   const [pin, setPin] = useState<string | null | undefined>(undefined);
   const [isPinVisible, setIsPinVisible] = useState(false);
+  useRefreshOnFocus(REFRESHED_KEYS);
+  const refreshNow = useManualRefresh(REFRESHED_KEYS);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const refresh = async () => {
+    setIsRefreshing(true);
+    await refreshNow().catch(() => {});
+    setIsRefreshing(false);
+  };
 
   useFocusEffect(
     useCallback(() => {
@@ -41,7 +54,12 @@ export function ProfileScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refresh} />}
+    >
       <Text style={styles.title}>Profil</Text>
 
       <View style={styles.card}>
@@ -79,18 +97,21 @@ export function ProfileScreen() {
         )}
       </View>
 
+      <TimeEntryHistory userId={user?.id} />
+
       <Pressable style={styles.logoutBtn} onPress={confirmLogout}>
         <Ionicons name="log-out-outline" size={18} color={colors.danger} />
         <Text style={styles.logoutBtnText}>Se déconnecter</Text>
       </Pressable>
 
       <View style={styles.navSpacer} />
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background, paddingTop: 28, paddingHorizontal: 24 },
+  container: { flex: 1, backgroundColor: colors.background },
+  content: { paddingTop: 28, paddingHorizontal: 24 },
   title: { fontFamily: fonts.display, fontSize: 24, color: colors.textPrimary, letterSpacing: -0.2 },
 
   card: {

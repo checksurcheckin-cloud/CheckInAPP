@@ -51,12 +51,15 @@ export function ClockInScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const entries = await apiClient.getMyTimeEntries();
+      // userId explicite : sans lui, un manager recevrait les pointages de
+      // toute l'entreprise et afficherait celui d'un collègue.
+      if (!user?.id) return;
+      const entries = await apiClient.getMyTimeEntries({ userId: user.id });
       setLastEntry(entries[0] ?? null);
     } catch {
       // Silencieux — l'écran reste utilisable, juste sans statut affiché.
     }
-  }, []);
+  }, [user?.id]);
 
   useFocusEffect(
     useCallback(() => {

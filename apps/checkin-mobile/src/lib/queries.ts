@@ -14,6 +14,8 @@ export const queryKeys = {
   users: ['users'] as const,
   openOffers: ['open-offers'] as const,
   myAvailabilities: ['my-availabilities'] as const,
+  // + début du mois affiché (ISO) : un cache par mois consulté.
+  myTimeEntries: ['my-time-entries'] as const,
 };
 
 // `mine: true` : ses propres shifts publiés, même pour un manager (décision
@@ -52,6 +54,18 @@ export function useMyAvailabilities(userId: string | undefined) {
   });
 }
 
+// Ses pointages du mois (historique du Profil). userId explicite, comme les
+// dispos : sans lui, un manager recevrait ceux de toute l'entreprise.
+export function useMyTimeEntries(userId: string | undefined, monthStart: Date) {
+  const from = monthStart.toISOString();
+  const to = new Date(new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1).getTime() - 1).toISOString();
+  return useQuery({
+    queryKey: [...queryKeys.myTimeEntries, from],
+    queryFn: () => apiClient.getMyTimeEntries({ userId: userId!, from, to }),
+    enabled: Boolean(userId),
+  });
+}
+
 // Les onglets restent montés : en revenant sur un écran, on recharge ce qui
 // a plus de 30 s, sans toucher à ce qui est encore frais.
 export function useRefreshOnFocus(keys: QueryKey[]) {
@@ -79,6 +93,7 @@ export function useManualRefresh(keys: QueryKey[]) {
 const INVALIDATIONS: Record<string, QueryKey[]> = {
   'shifts:changed': [queryKeys.myShifts, queryKeys.openOffers],
   'availabilities:changed': [queryKeys.myAvailabilities],
+  'time-entries:changed': [queryKeys.myTimeEntries],
   'sites:changed': [queryKeys.sites],
   'users:changed': [queryKeys.users],
 };

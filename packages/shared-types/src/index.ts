@@ -317,6 +317,9 @@ export interface PresentEmployee {
   since: string;
   // Début de la pause en cours, null si status !== 'on_break'.
   breakSince: string | null;
+  // Arrivée restée ouverte trop longtemps (départ oublié) : status 'left',
+  // à corriger par un pointage manuel.
+  missingClockOut?: boolean;
   // Pointages de la journée (jour civil du site), ordre chronologique — inclut
   // l'arrivée de la veille si la session était encore ouverte à minuit.
   entries: PresenceTimeEntry[];

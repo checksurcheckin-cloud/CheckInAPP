@@ -115,7 +115,7 @@ describe('TimeEntriesService', () => {
 
     it('flips to clock_out when the last event at this site was a clock_in', async () => {
       usersService.verifyPin.mockResolvedValue({ id: 'user-1', firstName: 'A', lastName: 'B' });
-      prisma.timeEntry.findFirst.mockResolvedValue({ type: 'clock_in' });
+      prisma.timeEntry.findFirst.mockResolvedValue({ type: 'clock_in', timestamp: new Date(Date.now() - 3_600_000) });
       prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
 
       await service.createFromDevice(device, { source: 'pin_code', userId: 'user-1', pin: '4321' });
@@ -123,16 +123,28 @@ describe('TimeEntriesService', () => {
       expect(prisma.timeEntry.findFirst).toHaveBeenCalledWith({
         where: { userId: 'user-1', siteId: 'site-a', type: { in: ['clock_in', 'clock_out'] } },
         orderBy: { timestamp: 'desc' },
-        select: { type: true },
+        select: { type: true, timestamp: true },
       });
       expect(prisma.timeEntry.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ type: 'clock_out' }),
       });
     });
 
+    it('starts a new arrival when the last clock_in was left open for more than 16 h (forgotten clock-out)', async () => {
+      usersService.verifyPin.mockResolvedValue({ id: 'user-1', firstName: 'A', lastName: 'B' });
+      prisma.timeEntry.findFirst.mockResolvedValue({ type: 'clock_in', timestamp: new Date(Date.now() - 38 * 24 * 3_600_000) });
+      prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
+
+      await service.createFromDevice(device, { source: 'pin_code', userId: 'user-1', pin: '4321' });
+
+      expect(prisma.timeEntry.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ type: 'clock_in' }),
+      });
+    });
+
     it('checks the PIN of the employee chosen on the kiosk, scoped to the device companyId', async () => {
       usersService.verifyPin.mockResolvedValue({ id: 'user-1', badgeCode: null });
-      prisma.timeEntry.findFirst.mockResolvedValue({ type: 'clock_in' });
+      prisma.timeEntry.findFirst.mockResolvedValue({ type: 'clock_in', timestamp: new Date() });
       prisma.timeEntry.create.mockResolvedValue({ id: 'entry-1' });
 
       await service.createFromDevice(device, {
@@ -538,6 +550,36 @@ describe('TimeEntriesService', () => {
 
       expect(result).toEqual([]);
       expect(prisma.user.findMany).not.toHaveBeenCalled();
+    });
+
+    it('only loads recent clock entries, so a clock-in left open weeks ago is not a presence', async () => {
+      prisma.site.findFirst.mockResolvedValue(brusselsSite);
+      prisma.timeEntry.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+      const result = await service.getPresence('company-a', 'site-a', now);
+
+      // Minuit local (2026-08-31T22:00Z) moins 16 h.
+      expect(prisma.timeEntry.findMany.mock.calls[0][0].where).toEqual({
+        siteId: 'site-a',
+        type: { in: ['clock_in', 'clock_out'] },
+        timestamp: { gte: at('2026-08-31T06:00:00.000Z') },
+      });
+      expect(result).toEqual([]);
+    });
+
+    it('flags an arrival open for more than 16 h as a missing clock-out instead of a presence', async () => {
+      prisma.site.findFirst.mockResolvedValue(brusselsSite);
+      prisma.timeEntry.findMany
+        .mockResolvedValueOnce([clock('user-1', 'clock_in', '2026-08-31T20:30:00.000Z')])
+        .mockResolvedValueOnce([
+          { userId: 'user-1', type: 'clock_in', timestamp: at('2026-08-31T20:30:00.000Z'), source: 'badge_scan' },
+        ]);
+      prisma.user.findMany.mockResolvedValue([{ id: 'user-1', firstName: 'A', lastName: 'B' }]);
+
+      const [result] = await service.getPresence('company-a', 'site-a', now);
+
+      expect(result.status).toBe('left');
+      expect(result.missingClockOut).toBe(true);
     });
 
     it('reports on_break with the break start when the last break since clock-in is still open', async () => {

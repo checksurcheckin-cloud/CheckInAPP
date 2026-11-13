@@ -176,6 +176,14 @@ Cible : PME de 20-100 employés par site.
     et renvoie en plus `source` (méthode de pointage) et
     `distanceFromSiteMeters` (haversine, uniquement pour `source: gps` et un
     site avec coordonnées).
+    **Arrivée sans départ depuis plus de 16 h = départ oublié, pas une
+    présence** (`MAX_OPEN_SESSION_HOURS`, `TimeEntriesService`) : la présence
+    l'affiche « Départ non pointé » (`missingClockOut`, status `left`) tant
+    qu'elle touche la journée, puis ne la montre plus ; la requête ne charge
+    que depuis minuit local moins 16 h. Même règle pour la tablette
+    (`nextClockType`) : le pointage suivant est une nouvelle arrivée, pas le
+    départ de cette vieille session. Bug d'origine : un clock_in jamais
+    refermé affichait l'employé « en poste » depuis 910 h.
 
 12. **Grille du planning (web-manager, `PlanningPage`) = tableau
     employés x jours, pas une colonne par jour avec les shifts empilés.**

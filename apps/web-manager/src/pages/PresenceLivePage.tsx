@@ -163,7 +163,16 @@ export function PresenceLivePage() {
                       {employee.firstName} {employee.lastName}
                     </span>
                     <span style={{ ...styles.badge, color: badge.color }}>{badge.text}</span>
-                    {isLeft ? (
+                    {employee.missingClockOut ? (
+                      <>
+                        <span style={{ ...styles.timerLabel, color: colors.danger }}>Départ non pointé</span>
+                        <span style={{ ...styles.timer, fontSize: typography.sizes.sm, color: colors.textSecondary }}>
+                          Arrivé le{' '}
+                          {new Date(employee.since).toLocaleDateString('fr-BE', { day: 'numeric', month: 'short' })} à{' '}
+                          {formatClockTime(employee.since)} — à corriger
+                        </span>
+                      </>
+                    ) : isLeft ? (
                       <>
                         <span style={styles.timerLabel}>
                           {status.label}

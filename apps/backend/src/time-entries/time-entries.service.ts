@@ -19,6 +19,9 @@ import { FindTimeEntriesQueryDto } from './dto/find-time-entries-query.dto';
 import { ScanRotatingQrDto } from './dto/scan-rotating-qr.dto';
 
 const PRESENCE_TYPES: TimeEntryType[] = ['clock_in', 'clock_out'];
+// Au-delà, une arrivée sans départ n'est plus affichée comme une présence
+// (journée légale de 11 h maximum + marge pour un shift de nuit).
+const MAX_OPEN_SESSION_HOURS = 16;
 
 @Injectable()
 export class TimeEntriesService {
@@ -281,9 +284,18 @@ export class TimeEntriesService {
       throw new NotFoundException('Site introuvable');
     }
     const dayStart = startOfZonedDay(now, site.timezone ?? 'Europe/Brussels');
+    // Une arrivée sans départ depuis plus de MAX_OPEN_SESSION_HOURS n'est plus
+    // une présence mais un départ oublié : sans cette limite, un clock_in
+    // jamais refermé affichait l'employé « en poste » pendant des semaines.
+    const staleBefore = new Date(now.getTime() - MAX_OPEN_SESSION_HOURS * 3_600_000);
+    // Une session encore utile aujourd'hui (shift de nuit ouvert à minuit) a
+    // commencé au plus MAX_OPEN_SESSION_HOURS avant minuit — plus tôt, elle
+    // serait de toute façon un départ oublié. Inutile de charger tout
+    // l'historique du site.
+    const lookback = new Date(dayStart.getTime() - MAX_OPEN_SESSION_HOURS * 3_600_000);
 
     const clockEntries = await this.prisma.timeEntry.findMany({
-      where: { siteId, type: { in: PRESENCE_TYPES } },
+      where: { siteId, type: { in: PRESENCE_TYPES }, timestamp: { gte: lookback } },
       orderBy: { timestamp: 'asc' },
       select: { userId: true, type: true, timestamp: true, source: true, geoLat: true, geoLng: true },
     });
@@ -338,7 +350,10 @@ export class TimeEntriesService {
     return users.map((u) => {
       const entries = entriesByUser.get(u.id)!;
       const clockIn = lastClockInByUser.get(u.id);
-      const isPresent = lastClockByUser.get(u.id)?.type === 'clock_in';
+      const isOpen = lastClockByUser.get(u.id)?.type === 'clock_in';
+      // Session ouverte depuis trop longtemps : départ non pointé, pas présent.
+      const missingClockOut = isOpen && clockIn !== undefined && clockIn.timestamp < staleBefore;
+      const isPresent = isOpen && !missingClockOut;
       const since = clockIn?.timestamp ?? entries[0].timestamp;
 
       // En pause = la dernière pause ouverte depuis l'arrivée n'a pas de fin.
@@ -361,6 +376,7 @@ export class TimeEntriesService {
         status,
         since,
         breakSince: onBreak ? lastBreak!.timestamp : null,
+        missingClockOut,
         source,
         geoLat,
         geoLng,
@@ -391,13 +407,18 @@ export class TimeEntriesService {
     return user;
   }
 
-  private async nextClockType(userId: string, siteId: string): Promise<TimeEntryType> {
+  // Arrivée ou départ, déduit du dernier pointage. Une arrivée restée
+  // ouverte plus de MAX_OPEN_SESSION_HOURS est un départ oublié (comme dans
+  // getPresence) : le pointage suivant est une nouvelle arrivée, pas le
+  // départ de cette vieille session.
+  private async nextClockType(userId: string, siteId: string, now: Date = new Date()): Promise<TimeEntryType> {
     const last = await this.prisma.timeEntry.findFirst({
       where: { userId, siteId, type: { in: PRESENCE_TYPES } },
       orderBy: { timestamp: 'desc' },
-      select: { type: true },
+      select: { type: true, timestamp: true },
     });
-    return last?.type === 'clock_in' ? 'clock_out' : 'clock_in';
+    const staleBefore = now.getTime() - MAX_OPEN_SESSION_HOURS * 3_600_000;
+    return last?.type === 'clock_in' && last.timestamp.getTime() >= staleBefore ? 'clock_out' : 'clock_in';
   }
 
   // Chaque méthode d'auto-pointage a son propre réglage (indépendants,

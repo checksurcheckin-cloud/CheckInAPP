@@ -127,7 +127,12 @@ export function PlanningPage() {
   const [isTemplateTrayStuck, setIsTemplateTrayStuck] = useState(false);
   // Mode « selon les besoins » (Réglages, décision #40) : la barre affiche
   // les besoins de la date choisie au lieu des modèles libres.
-  const needsMode = useCompany().data?.planningMode === 'needs';
+  // Tant que les réglages ne sont pas chargés, le mode est inconnu : on
+  // n'affiche ni le formulaire libre ni la barre de besoins (sinon le
+  // formulaire « Nouveau shift » clignote au rechargement en mode besoins).
+  const companyQuery = useCompany();
+  const planningModeKnown = !companyQuery.isPending;
+  const needsMode = companyQuery.data?.planningMode === 'needs';
   const hasTemplates = needsMode || templates.length > 0;
 
   useEffect(() => {
@@ -654,7 +659,7 @@ export function PlanningPage() {
           Lecture seule : ce magasin ne fait pas partie des vôtres. Vous pouvez consulter son planning, mais pas le
           modifier.
         </div>
-      ) : needsMode ? null : (
+      ) : needsMode || !planningModeKnown ? null : (
       <div style={styles.createForm}>
         <h2 style={styles.sectionTitle}>Nouveau shift</h2>
         <p style={styles.hint}>
@@ -742,7 +747,7 @@ export function PlanningPage() {
         </>
       ) : null}
 
-      {templates.length > 0 && !readOnly && !needsMode ? (
+      {templates.length > 0 && !readOnly && !needsMode && planningModeKnown ? (
         <>
           <div ref={templateSentinelRef} aria-hidden style={styles.templateSentinel} />
           <div style={{ ...styles.templateTray, ...(isTemplateTrayStuck ? styles.templateTrayStuck : {}) }}>

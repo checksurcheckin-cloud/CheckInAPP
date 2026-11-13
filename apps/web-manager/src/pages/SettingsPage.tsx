@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { MapPin, Scale, Smartphone } from 'lucide-react';
+import { Check, MapPin, Save, Scale, Smartphone } from 'lucide-react';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import { apiClient, useAuth } from '../services/AuthService';
 import { queryKeys, useCompany, useJointCommittees } from '../lib/queries';
@@ -16,36 +16,74 @@ export function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
   const jointCommittees = useJointCommittees().data ?? [];
 
-  const setJointCommittee = async (code: string) => {
-    if (!company || !isAdmin) return;
+  // Les modifications restent en brouillon sur la page jusqu'au clic sur
+  // « Enregistrer » : un seul envoi pour tous les réglages modifiés.
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const saved: Draft | null = company
+    ? {
+        jointCommittee: company.jointCommittee ?? '',
+        mobileClockInEnabled: company.mobileClockInEnabled,
+        gpsClockInEnabled: company.gpsClockInEnabled,
+      }
+    : null;
+  const current = draft ?? saved;
+  const changes =
+    current && saved
+      ? (Object.keys(current) as (keyof Draft)[]).filter((key) => current[key] !== saved[key])
+      : [];
+  const isDirty = changes.length > 0;
+
+  const update = (patch: Partial<Draft>) => {
+    if (!current || !isAdmin) return;
+    setSavedAt(null);
+    setDraft({ ...current, ...patch });
+  };
+
+  const save = async () => {
+    if (!current || !isDirty || !isAdmin) return;
     setError(null);
     setIsSaving(true);
     try {
-      const updated = await apiClient.updateCompanySettings({ jointCommittee: code || null });
+      const updated = await apiClient.updateCompanySettings({
+        ...(changes.includes('jointCommittee') ? { jointCommittee: current.jointCommittee || null } : {}),
+        ...(changes.includes('mobileClockInEnabled') ? { mobileClockInEnabled: current.mobileClockInEnabled } : {}),
+        ...(changes.includes('gpsClockInEnabled') ? { gpsClockInEnabled: current.gpsClockInEnabled } : {}),
+      });
       queryClient.setQueryData(queryKeys.company, updated);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.compliance });
+      if (changes.includes('jointCommittee')) void queryClient.invalidateQueries({ queryKey: queryKeys.compliance });
+      setDraft(null);
+      setSavedAt(Date.now());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Échec de la mise à jour');
+      setError(err instanceof Error ? err.message : "Échec de l'enregistrement");
     } finally {
       setIsSaving(false);
     }
   };
 
-  const toggle = async (key: 'gpsClockInEnabled' | 'mobileClockInEnabled') => {
-    if (!company || !isAdmin) return;
+  const cancel = () => {
+    setDraft(null);
     setError(null);
-    setIsSaving(true);
-    try {
-      const updated = await apiClient.updateCompanySettings({ [key]: !company[key] });
-      queryClient.setQueryData(queryKeys.company, updated);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Échec de la mise à jour');
-    } finally {
-      setIsSaving(false);
-    }
   };
+
+  // Le message « Réglages enregistrés » s'efface de lui-même.
+  useEffect(() => {
+    if (!savedAt) return;
+    const timer = setTimeout(() => setSavedAt(null), 4000);
+    return () => clearTimeout(timer);
+  }, [savedAt]);
+
+  // Quitter la page (fermeture d'onglet, rechargement) avec des modifications
+  // non enregistrées : le navigateur demande confirmation.
+  useEffect(() => {
+    if (!isDirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [isDirty]);
 
   return (
     <div>
@@ -53,7 +91,7 @@ export function SettingsPage() {
 
       {isLoading ? (
         <p style={styles.muted}>Chargement…</p>
-      ) : company ? (
+      ) : company && current ? (
         <>
         <div style={{ ...styles.card, marginBottom: spacing.lg }}>
           <div style={styles.rowHeader}>
@@ -68,9 +106,9 @@ export function SettingsPage() {
                 par exemple un service de livraison.
               </p>
               <select
-                value={company.jointCommittee ?? ''}
+                value={current.jointCommittee}
                 disabled={!isAdmin || isSaving}
-                onChange={(e) => void setJointCommittee(e.target.value)}
+                onChange={(e) => update({ jointCommittee: e.target.value })}
                 style={styles.select}
               >
                 <option value="">Non renseignée — socle légal uniquement</option>
@@ -92,25 +130,54 @@ export function SettingsPage() {
             icon={<Smartphone size={18} color={colors.primary} strokeWidth={2.25} />}
             title="Pointage par QR sur le téléphone"
             description="Autorise par défaut les employés à afficher sur leur téléphone le QR que la tablette scanne. Si le QR et le GPS sont tous deux désactivés, l'onglet Pointage disparaît de l'app mobile et le Planning devient l'écran d'accueil : on pointe alors uniquement par PIN ou badge sur la tablette."
-            checked={company.mobileClockInEnabled}
+            checked={current.mobileClockInEnabled}
             disabled={!isAdmin || isSaving}
-            onToggle={() => toggle('mobileClockInEnabled')}
+            onToggle={() => update({ mobileClockInEnabled: !current.mobileClockInEnabled })}
           />
           <div style={styles.divider} />
           <SettingRow
             icon={<MapPin size={18} color={colors.primary} strokeWidth={2.25} />}
             title="Pointage GPS"
             description="Autorise par défaut les employés à pointer via la géolocalisation de leur téléphone, indépendamment du QR. Désactivé, l'option GPS n'apparaît plus dans l'app mobile."
-            checked={company.gpsClockInEnabled}
+            checked={current.gpsClockInEnabled}
             disabled={!isAdmin || isSaving}
-            onToggle={() => toggle('gpsClockInEnabled')}
+            onToggle={() => update({ gpsClockInEnabled: !current.gpsClockInEnabled })}
           />
           <p style={styles.status}>
             Ces deux réglages peuvent être surchargés individuellement pour chaque employé depuis l'écran Équipe.
           </p>
           {!isAdmin ? <p style={styles.muted}>Seul un administrateur peut modifier ces réglages.</p> : null}
-          {error ? <p style={styles.error}>{error}</p> : null}
         </div>
+
+        {isAdmin ? (
+          <div style={styles.saveBar}>
+            <span style={styles.saveStatus}>
+              {error ? (
+                <span style={{ color: colors.danger }}>{error}</span>
+              ) : isDirty ? (
+                `${changes.length} modification${changes.length > 1 ? 's' : ''} non enregistrée${changes.length > 1 ? 's' : ''}`
+              ) : savedAt ? (
+                <span style={styles.savedText}>
+                  <Check size={14} strokeWidth={2.5} /> Réglages enregistrés
+                </span>
+              ) : (
+                'Aucune modification'
+              )}
+            </span>
+            <button className="btn" style={styles.cancelButton} disabled={!isDirty || isSaving} onClick={cancel}>
+              Annuler
+            </button>
+            <button
+              className="btn btn-gradient"
+              style={{ ...styles.saveButton, opacity: !isDirty || isSaving ? 0.5 : 1 }}
+              disabled={!isDirty || isSaving}
+              onClick={() => void save()}
+            >
+              <Save size={15} strokeWidth={2.25} />
+              {isSaving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+          </div>
+        ) : null}
         </>
       ) : (
         <p style={styles.muted}>Impossible de charger les réglages de l'entreprise.</p>
@@ -118,6 +185,12 @@ export function SettingsPage() {
     </div>
   );
 }
+
+type Draft = {
+  jointCommittee: string; // '' = non renseignée
+  mobileClockInEnabled: boolean;
+  gpsClockInEnabled: boolean;
+};
 
 function SettingRow({
   icon,
@@ -212,6 +285,44 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: colors.surface,
     color: colors.textPrimary,
     fontSize: typography.sizes.sm,
+  },
+  saveBar: {
+    position: 'sticky',
+    bottom: 0,
+    maxWidth: 640,
+    marginTop: spacing.lg,
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: `${spacing.md}px ${spacing.lg}px`,
+    backgroundColor: colors.surface,
+    border: `1px solid ${colors.border}`,
+    borderRadius: radius.lg,
+    boxShadow: shadows.md,
+  },
+  saveStatus: { flex: 1, fontSize: typography.sizes.sm, color: colors.textSecondary },
+  savedText: { display: 'inline-flex', alignItems: 'center', gap: 4, color: colors.success, fontWeight: 600 },
+  cancelButton: {
+    padding: `${spacing.sm}px ${spacing.md}px`,
+    borderRadius: radius.md,
+    border: `1px solid ${colors.border}`,
+    backgroundColor: colors.surface,
+    color: colors.textPrimary,
+    fontWeight: 600,
+    fontSize: typography.sizes.sm,
+    cursor: 'pointer',
+  },
+  saveButton: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacing.xs,
+    padding: `${spacing.sm}px ${spacing.lg}px`,
+    borderRadius: radius.md,
+    border: 'none',
+    color: colors.surface,
+    fontWeight: 600,
+    fontSize: typography.sizes.sm,
+    cursor: 'pointer',
   },
   divider: { height: 1, backgroundColor: colors.border, margin: `${spacing.lg}px 0` },
   stateTag: { fontSize: typography.sizes.xs, fontWeight: 600 },

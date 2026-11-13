@@ -40,7 +40,33 @@ export interface Company {
   mobileClockInEnabled: boolean;
   // Commission paritaire ("302", "201"…) : règles de conformité du planning.
   jointCommittee?: string | null;
+  // Création des horaires : libre, ou seulement d'après les besoins de l'admin.
+  planningMode?: PlanningMode;
   createdAt: string;
+}
+
+export type PlanningMode = 'free' | 'needs';
+
+// ---- Besoins journaliers en personnel (page Besoins, admin) ----
+// Heures locales du site ; fin avant début = shift de nuit.
+export interface StaffingNeedLine {
+  startTime: string; // "HH:mm"
+  endTime: string;
+  roleNeeded: string | null;
+  count: number;
+}
+
+export interface SiteStaffingNeeds {
+  // Semaine type, lundi = 0.
+  weekly: { dayOfWeek: number; needs: StaffingNeedLine[] }[];
+  // Exceptions par date (liste vide = jour fermé).
+  dates: { date: string; needs: StaffingNeedLine[] }[];
+}
+
+export interface ResolvedStaffingDay {
+  date: string; // YYYY-MM-DD
+  source: 'weekly' | 'date';
+  needs: StaffingNeedLine[];
 }
 
 // Périmètre magasins de l'utilisateur connecté (manager limité à certains

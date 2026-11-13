@@ -24,6 +24,13 @@ enum UserStatus {
 // Type de contrat — détermine les règles de conformité du planning
 // (src/compliance) : temps partiel, étudiant et flexi-job n'ont pas les
 // mêmes limites qu'un temps plein.
+// Création des horaires : librement (modèles du manager), ou seulement
+// d'après les besoins journaliers définis par l'admin (StaffingNeed).
+enum PlanningMode {
+  free
+  needs
+}
+
 enum ContractType {
   full_time
   part_time
@@ -99,6 +106,7 @@ model Company {
   // Commission paritaire ("302", "201", "140.03"…) : choisit le jeu de règles
   // de conformité du planning (src/compliance). Surchargeable par site.
   jointCommittee String? @map("joint_committee")
+  planningMode   PlanningMode @default(free) @map("planning_mode")
   createdAt DateTime @default(now()) @map("created_at")
 
   sites     Site[]
@@ -126,6 +134,8 @@ model Site {
   timeEntries TimeEntry[]
   employees   User[]
   managers    ManagedSite[]
+  staffingNeeds     StaffingNeed[]
+  staffingNeedDates StaffingNeedDate[]
 
   @@map("sites")
 }
@@ -393,4 +403,35 @@ model PushToken {
 
   @@index([userId])
   @@map("push_tokens")
+}
+
+// Besoin en personnel d'un site (page Besoins, admin) : « N personnes de
+// HH:mm à HH:mm, rôle X ». Soit dans la semaine type (`dayOfWeek`, lundi =
+// 0), soit pour une date précise (`specificDate`). Heures locales du site.
+model StaffingNeed {
+  id           String    @id @default(uuid())
+  siteId       String    @map("site_id")
+  site         Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  dayOfWeek    Int?      @map("day_of_week")
+  specificDate DateTime? @db.Date @map("specific_date")
+  startTime    String    @map("start_time")
+  endTime      String    @map("end_time")
+  roleNeeded   String?   @map("role_needed")
+  count        Int
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([siteId, dayOfWeek])
+  @@index([siteId, specificDate])
+  @@map("staffing_needs")
+}
+
+// Date dont les besoins remplacent ceux de la semaine type — même vide
+// (jour fermé). Sans ligne ici, la date suit la semaine type.
+model StaffingNeedDate {
+  siteId String   @map("site_id")
+  site   Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  date   DateTime @db.Date
+
+  @@id([siteId, date])
+  @@map("staffing_need_dates")
 }

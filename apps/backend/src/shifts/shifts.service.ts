@@ -10,6 +10,7 @@ import { AssignShiftDto } from './dto/assign-shift.dto';
 import { ApproveShiftOfferDto } from './dto/approve-shift-offer.dto';
 import { FindShiftsQueryDto } from './dto/find-shifts-query.dto';
 import { ProposeShiftOnMarketDto } from './dto/propose-shift-on-market.dto';
+import { StaffingNeedsService } from '../staffing-needs/staffing-needs.service';
 
 @Injectable()
 export class ShiftsService {
@@ -17,6 +18,7 @@ export class ShiftsService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
     private readonly notifications: NotificationsService,
+    private readonly staffingNeeds: StaffingNeedsService,
   ) {}
 
   async create(companyId: string, createdBy: string, dto: CreateShiftDto) {
@@ -31,6 +33,16 @@ export class ShiftsService {
       throw new BadRequestException("L'heure de fin doit être après l'heure de début");
     }
     ensureNotEnded(endsAt, 'Impossible de créer un shift déjà terminé');
+    // Mode « selon les besoins » : seulement un besoin défini par l'admin,
+    // dans la limite du nombre demandé (décision #40).
+    if (dto.status !== 'cancelled') {
+      await this.staffingNeeds.ensureShiftMatchesNeed(companyId, {
+        siteId: dto.siteId,
+        startsAt,
+        endsAt,
+        roleNeeded: dto.roleNeeded ?? null,
+      });
+    }
 
     const shift = await this.prisma.shift.create({
       data: {
@@ -251,6 +263,22 @@ export class ShiftsService {
       throw new BadRequestException("L'heure de fin doit être après l'heure de début");
     }
     ensureNotEnded(endsAt, 'Impossible de déplacer un shift dans le passé');
+    // Déplacé, réhoraire, changé de site ou de rôle : doit toujours
+    // correspondre à un besoin (mode « selon les besoins », décision #40).
+    const slotChanged =
+      (dto.siteId && dto.siteId !== existing.siteId) ||
+      startsAt.getTime() !== existing.startsAt.getTime() ||
+      endsAt.getTime() !== existing.endsAt.getTime() ||
+      (dto.roleNeeded !== undefined && (dto.roleNeeded || null) !== (existing.roleNeeded || null));
+    if (slotChanged && (dto.status ?? existing.status) !== 'cancelled') {
+      await this.staffingNeeds.ensureShiftMatchesNeed(companyId, {
+        siteId: dto.siteId ?? existing.siteId,
+        startsAt,
+        endsAt,
+        roleNeeded: dto.roleNeeded !== undefined ? dto.roleNeeded : existing.roleNeeded,
+        excludeShiftId: id,
+      });
+    }
 
     const shift = await this.prisma.shift.update({
       where: { id },

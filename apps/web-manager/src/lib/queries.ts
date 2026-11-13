@@ -21,6 +21,10 @@ export const queryKeys = {
   compliance: ['compliance'] as const,
   complianceRange: (siteId: string, from: string, to: string) => ['compliance', siteId, from, to] as const,
   jointCommittees: ['joint-committees'] as const,
+  staffingNeeds: ['staffing-needs'] as const,
+  siteStaffingNeeds: (siteId: string) => ['staffing-needs', 'site', siteId] as const,
+  resolvedStaffingNeeds: (siteId: string, from: string, to: string) =>
+    ['staffing-needs', 'resolved', siteId, from, to] as const,
 };
 
 // Magasins de l'entreprise + périmètre du manager connecté (décision #36).
@@ -91,6 +95,25 @@ export function useJointCommittees() {
   });
 }
 
+// Semaine type + exceptions d'un site (page Besoins, admin).
+export function useSiteStaffingNeeds(siteId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.siteStaffingNeeds(siteId ?? ''),
+    queryFn: () => apiClient.getStaffingNeeds(siteId!),
+    enabled: Boolean(siteId),
+  });
+}
+
+// Besoins effectifs jour par jour (planning en mode « selon les besoins ») ;
+// `from`/`to` au format YYYY-MM-DD.
+export function useResolvedStaffingNeeds(siteId: string | null, from: string, to: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.resolvedStaffingNeeds(siteId ?? '', from, to),
+    queryFn: () => apiClient.getResolvedStaffingNeeds({ siteId: siteId!, from, to }),
+    enabled: enabled && Boolean(siteId),
+  });
+}
+
 export function useCompany() {
   return useQuery({ queryKey: queryKeys.company, queryFn: () => apiClient.getMyCompany() });
 }
@@ -105,6 +128,7 @@ const INVALIDATIONS: Record<string, QueryKey[]> = {
   'time-entries:changed': [queryKeys.presence],
   'settings:changed': [queryKeys.company, queryKeys.compliance],
   'sites:changed': [queryKeys.siteScope, queryKeys.compliance],
+  'staffing-needs:changed': [queryKeys.staffingNeeds],
   'users:changed': [queryKeys.users, queryKeys.siteScope, queryKeys.compliance],
 };
 

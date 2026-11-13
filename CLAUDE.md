@@ -1007,6 +1007,39 @@ Cible : PME de 20-100 employés par site.
       dérogations individuelles, ni de calcul sur la période de référence
       (moyenne de 38 h).
 
+40. **Planification « libre » ou « selon les besoins » — choix de l'admin
+    (Réglages, `Company.planningMode`, défaut `free` = comportement
+    historique).** En mode `needs`, le planning ne propose plus que les
+    besoins journaliers définis par l'admin ; aucun shift ne peut être créé
+    en dehors, ni au-delà du nombre demandé.
+    - **Besoins** (page Besoins, admin uniquement, `NeedsPage`, route
+      `/needs`) : par magasin, une **semaine type** (`StaffingNeed.dayOfWeek`,
+      lundi = 0) et des **exceptions** à une date (`StaffingNeedDate` marque
+      la date, `StaffingNeed.specificDate` ses lignes ; exception vide = jour
+      fermé). L'exception remplace entièrement la semaine type pour cette
+      date. Une ligne = « N personnes de HH:mm à HH:mm, rôle X », heures
+      locales du site (fin < début = nuit). Chaque jour s'édite en brouillon
+      et s'enregistre d'un coup (`PUT /staffing-needs/weekly`,
+      `PUT|DELETE /staffing-needs/dates/:date`, admin) ; événement
+      `staffing-needs:changed`. `GET /staffing-needs/resolved` (admin/manager)
+      donne les besoins effectifs jour par jour.
+    - **Backend arbitre** : `StaffingNeedsService.ensureShiftMatchesNeed`,
+      appelé par `ShiftsService.create` et `update` (quand le créneau, le site
+      ou le rôle change) — ne fait rien en mode libre. Un shift correspond à
+      un besoin s'il a la même date locale, les mêmes heures locales et le
+      même rôle (vide = sans rôle) ; refus (409) si aucun besoin ne correspond
+      (« Hors besoins ») ou si le nombre de shifts déjà planifiés sur ce
+      besoin atteint le nombre demandé (« Besoin déjà couvert »). Pas de lien
+      en base entre shift et besoin : modifier un besoin ne touche pas aux
+      shifts déjà planifiés.
+    - **Planning** (mode besoins, vue semaine) : le formulaire « Nouveau
+      shift » et les modèles libres disparaissent ; cliquer sur l'en-tête d'un
+      jour affiche ses besoins dans la barre collante (`NeedCard`, « N
+      restants sur M », grisée une fois complète), à glisser sur un employé
+      ou sur « Shifts disponibles » — uniquement dans la colonne de cette
+      date. Le restant est calculé côté client sur les shifts chargés (même
+      règle que le backend, qui fait foi).
+
 ## Stack
 
 - Backend : NestJS + PostgreSQL + Prisma + Passport/JWT

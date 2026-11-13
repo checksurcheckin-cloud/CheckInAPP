@@ -26,6 +26,7 @@ export class CompaniesService {
         gpsClockInEnabled: dto.gpsClockInEnabled,
         mobileClockInEnabled: dto.mobileClockInEnabled,
         jointCommittee: dto.jointCommittee,
+        planningMode: dto.planningMode,
       },
     });
     // checkin-mobile affiche/masque l'onglet Pointage en direct (décision #35).

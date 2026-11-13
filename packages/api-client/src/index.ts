@@ -26,6 +26,10 @@ import type {
   ComplianceViolation,
   ContractType,
   JointCommittee,
+  PlanningMode,
+  ResolvedStaffingDay,
+  SiteStaffingNeeds,
+  StaffingNeedLine,
 } from '@horaires/shared-types';
 
 export { connectRealtime } from './realtime';
@@ -75,7 +79,7 @@ export class ApiClient {
   }
 
   private async request<T>(
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown,
   ): Promise<T> {
@@ -187,6 +191,7 @@ export class ApiClient {
     gpsClockInEnabled?: boolean;
     mobileClockInEnabled?: boolean;
     jointCommittee?: string | null;
+    planningMode?: PlanningMode;
   }) {
     return this.request<Company>('PATCH', '/companies/me/settings', payload);
   }
@@ -333,6 +338,28 @@ export class ApiClient {
     payload: { contractType?: ContractType | null; weeklyContractHours?: number | null; birthDate?: string | null },
   ) {
     return this.request<User>('PATCH', `/users/${userId}/contract`, payload);
+  }
+
+  // ---- Besoins journaliers (admin ; lecture des besoins effectifs pour les managers) ----
+  getStaffingNeeds(siteId: string) {
+    return this.request<SiteStaffingNeeds>('GET', `/staffing-needs${toQueryString({ siteId })}`);
+  }
+
+  getResolvedStaffingNeeds(params: { siteId: string; from: string; to: string }) {
+    return this.request<ResolvedStaffingDay[]>('GET', `/staffing-needs/resolved${toQueryString(params)}`);
+  }
+
+  setWeeklyStaffingNeeds(siteId: string, dayOfWeek: number, needs: StaffingNeedLine[]) {
+    return this.request<void>('PUT', '/staffing-needs/weekly', { siteId, dayOfWeek, needs });
+  }
+
+  // `needs` vide = jour fermé (exception sans besoin).
+  setDateStaffingNeeds(siteId: string, date: string, needs: StaffingNeedLine[]) {
+    return this.request<void>('PUT', `/staffing-needs/dates/${date}`, { siteId, needs });
+  }
+
+  clearDateStaffingNeeds(siteId: string, date: string) {
+    return this.request<void>('DELETE', `/staffing-needs/dates/${date}${toQueryString({ siteId })}`);
   }
 
   // ---- Conformité du planning (droit du travail belge) ----

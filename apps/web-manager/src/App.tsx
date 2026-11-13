@@ -13,6 +13,7 @@ import { ShiftApprovalPage } from './pages/ShiftApprovalPage';
 import { TeamPage } from './pages/TeamPage'; // gestion des employés, badges, PIN
 import { SettingsPage } from './pages/SettingsPage'; // réglages entreprise (ex: pointage GPS)
 import { SitesPage } from './pages/SitesPage'; // gestion des lieux de travail (adresse -> coordonnées)
+import { NeedsPage } from './pages/NeedsPage'; // besoins journaliers en personnel (admin)
 
 /**
  * App web réservée aux managers/admins. C'est le SEUL endroit de tout le
@@ -70,6 +71,7 @@ function RootRoutes() {
             retombe sur le planning. */}
         {user.role === 'admin' ? (
           <>
+            <Route path="/needs" element={<NeedsPage />} />
             <Route path="/sites" element={<SitesPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </>

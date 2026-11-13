@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ShiftsService } from './shifts.service';
+import { StaffingNeedsService } from '../staffing-needs/staffing-needs.service';
 
 describe('ShiftsService', () => {
   let service: ShiftsService;
@@ -112,6 +113,8 @@ describe('ShiftsService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: RealtimeGateway, useValue: realtime },
         { provide: NotificationsService, useValue: notifications },
+        // Mode libre par défaut : le contrôle des besoins est testé à part.
+        { provide: StaffingNeedsService, useValue: { ensureShiftMatchesNeed: jest.fn() } },
       ],
     }).compile();
 

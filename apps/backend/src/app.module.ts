@@ -13,6 +13,7 @@ import { SiteScopeModule } from './site-scope/site-scope.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ComplianceModule } from './compliance/compliance.module';
+import { StaffingNeedsModule } from './staffing-needs/staffing-needs.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ComplianceModule } from './compliance/compliance.module';
     GeocodingModule,
     NotificationsModule,
     ComplianceModule,
+    StaffingNeedsModule,
   ],
 })
 export class AppModule {}

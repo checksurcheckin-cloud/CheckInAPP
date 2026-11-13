@@ -12,6 +12,11 @@ export class UpdateCompanySettingsDto {
   @IsBoolean()
   mobileClockInEnabled?: boolean;
 
+  // Création des horaires : libre, ou selon les besoins de l'admin (décision #40).
+  @IsOptional()
+  @IsIn(['free', 'needs'])
+  planningMode?: 'free' | 'needs';
+
   // Commission paritaire (src/compliance/rule-packs.ts) — null = aucune.
   @IsOptional()
   @IsIn(JOINT_COMMITTEE_CODES)

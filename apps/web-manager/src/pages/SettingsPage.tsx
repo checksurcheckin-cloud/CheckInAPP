@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, MapPin, Save, Scale, Smartphone } from 'lucide-react';
+import { CalendarCog, Check, MapPin, Save, Scale, Smartphone } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import type { PlanningMode } from '@horaires/shared-types';
 import { colors, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import { apiClient, useAuth } from '../services/AuthService';
 import { queryKeys, useCompany, useJointCommittees } from '../lib/queries';
@@ -26,6 +28,7 @@ export function SettingsPage() {
   const saved: Draft | null = company
     ? {
         jointCommittee: company.jointCommittee ?? '',
+        planningMode: company.planningMode ?? 'free',
         mobileClockInEnabled: company.mobileClockInEnabled,
         gpsClockInEnabled: company.gpsClockInEnabled,
       }
@@ -50,6 +53,7 @@ export function SettingsPage() {
     try {
       const updated = await apiClient.updateCompanySettings({
         ...(changes.includes('jointCommittee') ? { jointCommittee: current.jointCommittee || null } : {}),
+        ...(changes.includes('planningMode') ? { planningMode: current.planningMode } : {}),
         ...(changes.includes('mobileClockInEnabled') ? { mobileClockInEnabled: current.mobileClockInEnabled } : {}),
         ...(changes.includes('gpsClockInEnabled') ? { gpsClockInEnabled: current.gpsClockInEnabled } : {}),
       });
@@ -93,6 +97,48 @@ export function SettingsPage() {
         <p style={styles.muted}>Chargement…</p>
       ) : company && current ? (
         <>
+        <div style={{ ...styles.card, marginBottom: spacing.lg }}>
+          <div style={styles.rowHeader}>
+            <div style={styles.iconMark}>
+              <CalendarCog size={18} color={colors.primary} strokeWidth={2.25} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h2 style={styles.sectionTitle}>Création des horaires</h2>
+              <p style={styles.description}>
+                Comment les managers construisent le planning.
+              </p>
+              {PLANNING_MODES.map((mode) => (
+                <label
+                  key={mode.value}
+                  style={{
+                    ...styles.modeOption,
+                    ...(current.planningMode === mode.value ? styles.modeOptionActive : {}),
+                    cursor: isAdmin && !isSaving ? 'pointer' : 'default',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="planningMode"
+                    value={mode.value}
+                    checked={current.planningMode === mode.value}
+                    disabled={!isAdmin || isSaving}
+                    onChange={() => update({ planningMode: mode.value })}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>
+                    <strong style={styles.modeTitle}>{mode.title}</strong>
+                    <span style={styles.modeDescription}>{mode.description}</span>
+                  </span>
+                </label>
+              ))}
+              {current.planningMode === 'needs' ? (
+                <p style={styles.status}>
+                  Les besoins se définissent par magasin dans la page <Link to="/needs">Besoins</Link>.
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </div>
         <div style={{ ...styles.card, marginBottom: spacing.lg }}>
           <div style={styles.rowHeader}>
             <div style={styles.iconMark}>
@@ -186,8 +232,24 @@ export function SettingsPage() {
   );
 }
 
+const PLANNING_MODES: { value: PlanningMode; title: string; description: string }[] = [
+  {
+    value: 'free',
+    title: 'Libre',
+    description:
+      'Les managers créent leurs propres modèles de shift (ex. 16h-20h) et les déposent où ils veulent sur le planning.',
+  },
+  {
+    value: 'needs',
+    title: 'Selon les besoins',
+    description:
+      "Le planning ne propose que les besoins journaliers définis par l'admin (page Besoins) : en cliquant sur une date, les managers glissent ces créneaux sur les employés. Aucun shift ne peut être créé en dehors, ni au-delà du nombre de personnes demandé.",
+  },
+];
+
 type Draft = {
   jointCommittee: string; // '' = non renseignée
+  planningMode: PlanningMode;
   mobileClockInEnabled: boolean;
   gpsClockInEnabled: boolean;
 };
@@ -286,6 +348,18 @@ const styles: Record<string, React.CSSProperties> = {
     color: colors.textPrimary,
     fontSize: typography.sizes.sm,
   },
+  modeOption: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    padding: `${spacing.sm}px ${spacing.md}px`,
+    borderRadius: radius.md,
+    border: `1px solid ${colors.border}`,
+  },
+  modeOptionActive: { borderColor: colors.primary, backgroundColor: colors.primaryTint },
+  modeTitle: { display: 'block', fontSize: typography.sizes.sm, color: colors.textPrimary },
+  modeDescription: { display: 'block', fontSize: typography.sizes.xs, color: colors.textSecondary, lineHeight: 1.5, marginTop: 2 },
   saveBar: {
     position: 'sticky',
     bottom: 0,

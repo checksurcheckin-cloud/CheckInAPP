@@ -11,6 +11,7 @@ import {
   MapPin,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
 } from 'lucide-react';
 import { colors, gradients, spacing, radius, typography, shadows } from '@horaires/ui-tokens';
 import { useAuth } from '../services/AuthService';
@@ -32,6 +33,7 @@ const NAV_ITEMS = [
   { to: '/team', label: 'Équipe', icon: Users },
   // Réservés à l'admin (décision #37) : un manager ne crée ni ne modifie de
   // site, et ne touche pas aux réglages de l'entreprise.
+  { to: '/needs', label: 'Besoins', icon: ClipboardList, adminOnly: true },
   { to: '/sites', label: 'Sites', icon: MapPin, adminOnly: true },
   { to: '/settings', label: 'Réglages', icon: Settings, adminOnly: true },
 ];

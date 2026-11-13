@@ -15,7 +15,17 @@ import type { Availability, ProposeShiftOnMarketPayload, Shift, Site, User } fro
 import { ApiError } from '@horaires/api-client';
 import { apiClient } from '../services/AuthService';
 import { canManageSite } from '../lib/siteScope';
-import { queryKeys, useAvailabilities, useCompliance, useShifts, useSiteScope, useUsers } from '../lib/queries';
+import {
+  queryKeys,
+  useAvailabilities,
+  useCompany,
+  useCompliance,
+  useResolvedStaffingNeeds,
+  useShifts,
+  useSiteScope,
+  useUsers,
+} from '../lib/queries';
+import { NeedCard } from '../components/NeedCard';
 import { indexCompliance } from '../lib/compliance';
 import { CompliancePanel } from '../components/CompliancePanel';
 import { SiteSelect } from '../components/SiteSelect';
@@ -53,8 +63,15 @@ type WeekScope = 'week' | 'day';
 
 type DragPayload =
   | { type: 'shift'; shiftId: string; startsAt: string; endsAt: string }
-  | { type: 'template'; templateId: string; startTime: string; endTime: string; roleNeeded?: string };
+  // `needDate` : carte de besoin (mode « selon les besoins »), déposable
+  // seulement à cette date (YYYY-MM-DD).
+  | { type: 'template'; templateId: string; startTime: string; endTime: string; roleNeeded?: string; needDate?: string };
 type DropPayload = { type: 'cell'; date: string; employeeId: string | null };
+
+// "YYYY-MM-DD" en heure locale.
+function dayKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
 
 const NO_SITES: Site[] = [];
 const NO_USERS: User[] = [];
@@ -77,6 +94,9 @@ export function PlanningPage() {
   const [weekScope, setWeekScope] = useState<WeekScope>('week');
   const [selectedDay, setSelectedDay] = useState(() => new Date());
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  // Date dont la barre de besoins affiche les créneaux (mode besoins) : on
+  // clique sur l'en-tête d'un jour pour en changer.
+  const [needsDate, setNeedsDate] = useState(() => new Date());
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()));
 
   // Modèles de shift réutilisables ("16h-20h") — pas de date, voir
@@ -105,7 +125,10 @@ export function PlanningPage() {
 
   const templateSentinelRef = useRef<HTMLDivElement>(null);
   const [isTemplateTrayStuck, setIsTemplateTrayStuck] = useState(false);
-  const hasTemplates = templates.length > 0;
+  // Mode « selon les besoins » (Réglages, décision #40) : la barre affiche
+  // les besoins de la date choisie au lieu des modèles libres.
+  const needsMode = useCompany().data?.planningMode === 'needs';
+  const hasTemplates = needsMode || templates.length > 0;
 
   useEffect(() => {
     const sentinel = templateSentinelRef.current;
@@ -237,6 +260,9 @@ export function PlanningPage() {
         status: shift.status,
       });
       await refreshShifts();
+    } catch (err) {
+      // Ex. mode « selon les besoins » : la copie dépasserait le besoin.
+      setConflictMessage(err instanceof ApiError ? err.message : 'Impossible de dupliquer ce shift');
     } finally {
       setBusyId(null);
     }
@@ -352,7 +378,11 @@ export function PlanningPage() {
       await refreshShifts();
       setLastPlacedShiftId(created.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Échec de la création du shift');
+      const message = err instanceof Error ? err.message : 'Échec de la création du shift';
+      // Mode besoins : pas de formulaire où afficher l'erreur (hors besoins,
+      // besoin déjà couvert…) — la même fenêtre qu'un conflit d'assignation.
+      if (needsMode) setConflictMessage(message);
+      else setError(message);
     }
   };
 
@@ -403,6 +433,17 @@ export function PlanningPage() {
     const overData = over.data.current as DropPayload;
     if (overData.type !== 'cell') return;
 
+    if (activeData.type === 'template' && activeData.needDate && dayKey(new Date(overData.date)) !== activeData.needDate) {
+      setConflictMessage(
+        `Ce besoin est prévu le ${new Date(`${activeData.needDate}T12:00:00`).toLocaleDateString('fr-BE', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+        })} : déposez-le dans la colonne de ce jour.`,
+      );
+      return;
+    }
+
     if (activeData.type === 'shift') {
       void moveShift(activeData.shiftId, activeData.startsAt, activeData.endsAt, overData.date, overData.employeeId);
     } else if (activeData.type === 'template') {
@@ -439,6 +480,40 @@ export function PlanningPage() {
   // dépend pas de l'ordre), uniquement l'affichage.
   const sortedTemplates = [...templates].sort((a, b) => a.startTime.localeCompare(b.startTime));
   const allDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+
+  // La date des besoins suit la navigation : jour affiché en vue « Jour »,
+  // sinon aujourd'hui (s'il est dans la semaine) ou le lundi.
+  useEffect(() => {
+    if (weekScope === 'day') {
+      setNeedsDate(selectedDay);
+      return;
+    }
+    setNeedsDate((current) => {
+      const end = addDays(weekStart, 7);
+      if (current >= weekStart && current < end) return current;
+      const today = new Date();
+      return today >= weekStart && today < end ? today : weekStart;
+    });
+  }, [weekStart, weekScope, selectedDay]);
+
+  // Besoins de la semaine affichée, et ce qu'il en reste à planifier pour la
+  // date choisie (shifts du même jour, même horaire et même rôle — heure
+  // locale, comme le backend qui fait foi).
+  const needsWeekFrom = dayKey(startOfWeek(needsDate));
+  const needsWeekTo = dayKey(addDays(startOfWeek(needsDate), 6));
+  const resolvedNeeds = useResolvedStaffingNeeds(selectedSiteId, needsWeekFrom, needsWeekTo, needsMode).data;
+  const needsDateKey = dayKey(needsDate);
+  const needsOfDay = resolvedNeeds?.find((d) => d.date === needsDateKey);
+  const takenForNeed = (need: { startTime: string; endTime: string; roleNeeded: string | null }) =>
+    shifts.filter(
+      (s) =>
+        s.status !== 'cancelled' &&
+        dayKey(new Date(s.startsAt)) === needsDateKey &&
+        toHHmm(s.startsAt) === need.startTime &&
+        toHHmm(s.endsAt) === need.endTime &&
+        (s.roleNeeded || null) === (need.roleNeeded || null),
+    ).length;
+
   const days = weekScope === 'day' ? [selectedDay] : allDays;
 
   // Seul un shift déjà assigné restreint la cellule cible (pas de
@@ -579,7 +654,7 @@ export function PlanningPage() {
           Lecture seule : ce magasin ne fait pas partie des vôtres. Vous pouvez consulter son planning, mais pas le
           modifier.
         </div>
-      ) : (
+      ) : needsMode ? null : (
       <div style={styles.createForm}>
         <h2 style={styles.sectionTitle}>Nouveau shift</h2>
         <p style={styles.hint}>
@@ -634,7 +709,40 @@ export function PlanningPage() {
           pour pouvoir glisser une carte sur n'importe quelle ligne de la grille
           sans remonter. La sentinelle (hauteur 0) sort de l'écran au moment
           où la barre se colle, ce qui active l'ombre. */}
-      {templates.length > 0 && !readOnly ? (
+      {needsMode && !readOnly && viewMode === 'week' ? (
+        <>
+          <div ref={templateSentinelRef} aria-hidden style={styles.templateSentinel} />
+          <div style={{ ...styles.templateTray, ...(isTemplateTrayStuck ? styles.templateTrayStuck : {}) }}>
+            <div style={styles.needsHeader}>
+              <strong>
+                Besoins du{' '}
+                {needsDate.toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' })}
+              </strong>
+              <span style={styles.needsHint}>
+                {needsOfDay?.source === 'date' ? 'Exception pour cette date · ' : ''}
+                Cliquez sur un jour du planning pour voir ses besoins, puis glissez-les sur les employés.
+              </span>
+            </div>
+            {!needsOfDay ? (
+              <p style={styles.emptyTemplates}>Chargement des besoins…</p>
+            ) : needsOfDay.needs.length === 0 ? (
+              <p style={styles.emptyTemplates}>
+                {needsOfDay.source === 'date'
+                  ? 'Magasin fermé ce jour-là : aucun besoin.'
+                  : "Aucun besoin défini pour ce jour — l'admin les définit dans la page Besoins."}
+              </p>
+            ) : (
+              <div style={styles.templateRow}>
+                {needsOfDay.needs.map((need, i) => (
+                  <NeedCard key={`${needsDateKey}-${i}`} date={needsDateKey} index={i} need={need} taken={takenForNeed(need)} />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      ) : null}
+
+      {templates.length > 0 && !readOnly && !needsMode ? (
         <>
           <div ref={templateSentinelRef} aria-hidden style={styles.templateSentinel} />
           <div style={{ ...styles.templateTray, ...(isTemplateTrayStuck ? styles.templateTrayStuck : {}) }}>
@@ -684,8 +792,19 @@ export function PlanningPage() {
               {days.map((date) => {
                 const isToday = new Date().toDateString() === date.toDateString();
                 const weekdayIndex = weekScope === 'day' ? (date.getDay() + 6) % 7 : days.indexOf(date);
+                const isNeedsDate = needsMode && date.toDateString() === needsDate.toDateString();
                 return (
-                  <div key={`head-${date.toISOString()}`} style={{ ...styles.dayHeaderCell, ...(isToday ? styles.dayHeaderCellToday : {}) }}>
+                  <div
+                    key={`head-${date.toISOString()}`}
+                    style={{
+                      ...styles.dayHeaderCell,
+                      ...(isToday ? styles.dayHeaderCellToday : {}),
+                      ...(needsMode ? { cursor: 'pointer' } : {}),
+                      ...(isNeedsDate ? styles.dayHeaderCellNeeds : {}),
+                    }}
+                    onClick={needsMode ? () => setNeedsDate(date) : undefined}
+                    title={needsMode ? 'Afficher les besoins de ce jour' : undefined}
+                  >
                     <span style={styles.weekday}>{WEEKDAY_LABELS_FR[weekdayIndex]}</span>
                     <span style={styles.dayNumber}>{date.getDate()}</span>
                   </div>
@@ -1077,6 +1196,18 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: colors.background,
   },
   dayHeaderCellToday: { backgroundColor: colors.primaryTint },
+  dayHeaderCellNeeds: { boxShadow: `inset 0 -3px 0 ${colors.primary}` },
+  needsHeader: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
+    marginBottom: spacing.sm,
+    fontSize: typography.sizes.sm,
+    color: colors.textPrimary,
+    textTransform: 'none',
+  },
+  needsHint: { fontSize: typography.sizes.xs, color: colors.textSecondary },
   weekday: { fontSize: typography.sizes.xs, color: colors.textSecondary, textTransform: 'uppercase' },
   dayNumber: { fontSize: typography.sizes.md, fontWeight: 700, color: colors.textPrimary, fontFamily: "'Sora', sans-serif" },
   poolLabelCell: {

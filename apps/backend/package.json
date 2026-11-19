@@ -12,6 +12,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "create:platform-admin": "ts-node scripts/create-platform-admin.ts",
     "dev": "nest start --watch",
     "test": "jest",
     "test:watch": "jest --watch"

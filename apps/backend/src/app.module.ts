@@ -14,6 +14,7 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ComplianceModule } from './compliance/compliance.module';
 import { StaffingNeedsModule } from './staffing-needs/staffing-needs.module';
+import { PlatformModule } from './platform/platform.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { StaffingNeedsModule } from './staffing-needs/staffing-needs.module';
     NotificationsModule,
     ComplianceModule,
     StaffingNeedsModule,
+    PlatformModule,
   ],
 })
 export class AppModule {}

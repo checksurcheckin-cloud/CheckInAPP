@@ -90,6 +90,24 @@ enum NotificationType {
   shift_available
 }
 
+// Équipe CheckInApp (console plateforme, apps/platform-dashboard) — sans
+// aucun lien avec les rôles des entreprises clientes (UserRole).
+// owner : tout, y compris gérer les autres admins ; admin : modifier les
+// abonnements ; readonly : consulter seulement.
+enum PlatformRole {
+  owner
+  admin
+  readonly
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  past_due
+  suspended
+  canceled
+}
+
 // ---------- MODELS ----------
 
 model Company {
@@ -112,6 +130,7 @@ model Company {
   sites     Site[]
   users     User[]
   auditLogs AuditLog[]
+  subscription Subscription?
 
   @@map("companies")
 }
@@ -217,6 +236,10 @@ model SiteDevice {
   deviceLabel String   @map("device_label")
   qrSecret    String   @map("qr_secret")
   qrRotatedAt DateTime @default(now()) @map("qr_rotated_at")
+  // Dernière requête authentifiée de la tablette (DeviceJwtStrategy, au plus
+  // une écriture par minute) — la console plateforme en déduit en ligne /
+  // hors ligne. null = jamais connectée depuis l'ajout du champ.
+  lastSeenAt  DateTime? @map("last_seen_at")
 
   timeEntries TimeEntry[]
 
@@ -434,4 +457,60 @@ model StaffingNeedDate {
 
   @@id([siteId, date])
   @@map("staffing_need_dates")
+}
+
+// ---------- CONSOLE PLATEFORME (équipe CheckInApp) ----------
+// Séparé de User : un admin plateforme n'appartient à aucune entreprise et
+// se connecte avec son propre secret JWT (JWT_PLATFORM_SECRET, voir
+// src/platform) — un token d'entreprise n'ouvre jamais /platform/*, et
+// inversement. Créé uniquement par script (create:platform-admin).
+model PlatformAdmin {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  name         String
+  passwordHash String       @map("password_hash")
+  role         PlatformRole @default(readonly)
+  active       Boolean      @default(true)
+  lastLoginAt  DateTime?    @map("last_login_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  auditLogs PlatformAuditLog[]
+
+  @@map("platform_admins")
+}
+
+// Abonnement d'une entreprise cliente, géré à la main depuis la console
+// (pas encore de paiement en ligne). Absent = entreprise jamais configurée,
+// affichée comme essai. Le statut n'est pas encore appliqué au login des
+// entreprises (suspended/canceled ne bloquent rien pour l'instant).
+model Subscription {
+  id               String             @id @default(uuid())
+  companyId        String             @unique @map("company_id")
+  company          Company            @relation(fields: [companyId], references: [id])
+  plan             String             @default("trial")
+  status           SubscriptionStatus @default(trialing)
+  // Nombre d'employés prévus au contrat (indicatif, rien n'est bloqué).
+  seats            Int?
+  trialEndsAt      DateTime?          @map("trial_ends_at")
+  currentPeriodEnd DateTime?          @map("current_period_end")
+  notes            String?
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  @@map("subscriptions")
+}
+
+// Toute écriture faite depuis la console (qui, quoi, sur quoi, avant/après).
+model PlatformAuditLog {
+  id         String        @id @default(uuid())
+  adminId    String        @map("admin_id")
+  admin      PlatformAdmin @relation(fields: [adminId], references: [id])
+  action     String
+  targetType String        @map("target_type")
+  targetId   String?       @map("target_id")
+  payload    Json?
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("platform_audit_logs")
 }

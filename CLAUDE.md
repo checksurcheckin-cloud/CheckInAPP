@@ -28,6 +28,10 @@ Cible : PME de 20-100 employés par site.
   validation des échanges de shifts (Approvals), présence en direct, gestion de
   l'équipe (dont l'override GPS par employé), gestion des sites (avec
   géocodage d'adresse), réglages entreprise (toggle GPS).
+- **`apps/platform-dashboard`** — Console interne de l'équipe CheckInApp
+  (React/Vite, port 5174), PAS un client des entreprises : vue de toutes les
+  entreprises, abonnements, tablettes, santé du backend, journal. Parle
+  uniquement à `/platform/*`, avec sa propre authentification (décision #41).
 
 ## Décisions d'architecture déjà prises (ne pas reproposer sans raison forte)
 
@@ -1047,6 +1051,33 @@ Cible : PME de 20-100 employés par site.
       ou sur « Shifts disponibles » — uniquement dans la colonne de cette
       date. Le restant est calculé côté client sur les shifts chargés (même
       règle que le backend, qui fait foi).
+41. **Console plateforme (équipe CheckInApp) : seule exception au
+    cloisonnement multi-tenant, avec une authentification totalement
+    séparée.** `apps/backend/src/platform` + `apps/platform-dashboard`.
+    - Comptes à part (`PlatformAdmin`, rôles `owner` / `admin` /
+      `readonly`), sans lien avec `User` ; aucune inscription, création
+      uniquement par script :
+      `pnpm --filter @horaires/backend create:platform-admin -- <email> "<Nom>" "<MotDePasse>" [owner|admin|readonly]`.
+    - Token signé avec `JWT_PLATFORM_SECRET` + audience `checkinapp-platform`
+      + `typ: 'platform'` ; le secret doit différer de `JWT_ACCESS_SECRET` et
+      `JWT_DEVICE_SECRET`, sinon `/platform/*` répond 503. Routes protégées
+      UNIQUEMENT par `PlatformAuthGuard` (jamais `JwtAuthGuard` /
+      `TenantScopeGuard`), qui relit l'admin en base à chaque requête (un
+      compte désactivé ou rétrogradé perd l'accès immédiatement). Un token
+      d'entreprise est refusé sur `/platform/*`, un token plateforme sur les
+      routes d'entreprise (prouvé par `platform.guard.spec.ts`).
+    - Réponses construites champ par champ (`platform.service.ts`) : jamais
+      d'objet Prisma renvoyé tel quel, aucun secret (`qrSecret`,
+      `passwordHash`, `pinCodeHash`, `pinCodeEncrypted`, `badgeCode`) ne sort.
+    - `readonly` lit tout ; modifier un abonnement exige `owner` ou `admin`.
+      Toute écriture est tracée dans `PlatformAuditLog` (avant/après).
+    - `Subscription` (une par entreprise, absente = essai non configuré) est
+      gérée à la main : pas de paiement en ligne, et `suspended` / `canceled`
+      ne bloquent pas encore le login des entreprises. Pas d'impersonation.
+    - `SiteDevice.lastSeenAt` : mis à jour par `DeviceJwtStrategy` (au plus une
+      fois par minute) ; « en ligne » = activité dans les 10 dernières minutes.
+    - La migration s'applique comme les autres au démarrage du backend sur
+      Railway (`applyMigrationsOnRailway`), rien à lancer à la main.
 
 ## Stack
 
